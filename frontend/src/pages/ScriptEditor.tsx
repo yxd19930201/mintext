@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { scriptApi } from '../services/api/scriptApi'
 import { episodeApi } from '../services/api/episodeApi'
 import { aiApi } from '../services/api/aiApi'
+import { exportTxt } from '../utils/export'
 import type { Script, Episode } from '../types/models'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -96,6 +97,13 @@ export default function ScriptEditor() {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-ghost" onClick={() => {
+              const filename = episode ? `第${episode.episode_number}集_${episode.title}` : `第${episodeId}集`
+              exportTxt(content, filename)
+            }} disabled={!content}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              导出
+            </button>
             <button className="btn btn-ghost" onClick={handleGenerate} disabled={generating}>
               {generating ? (
                 <><span className="spinner" style={{ width: 13, height: 13 }} /> 生成中…</>

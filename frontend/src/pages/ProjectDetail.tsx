@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { episodeApi } from '../services/api/episodeApi'
 import { projectApi } from '../services/api/projectApi'
 import { aiApi } from '../services/api/aiApi'
+import { exportTxt } from '../utils/export'
 import type { Episode, Project, OutlineEpisode, AIConfig, AIPromptPreset } from '../types/models'
 
 export default function ProjectDetail() {
@@ -80,14 +81,28 @@ export default function ProjectDetail() {
     if (!outline) return
     setSyncingEpisodes(true)
     try {
+      // 先拉取最新完整分集列表（不受旧缓存影响）
+      const latestRes = await episodeApi.list(id)
+      const latestEpisodes = latestRes.data
+
+      // 删除大纲集数之外的多余分集
+      for (const ep of latestEpisodes) {
+        const inOutline = outline.episodes.find(o => o.episode_number === ep.episode_number)
+        if (!inOutline) {
+          await episodeApi.delete(id, ep.id)
+        }
+      }
+
+      // 按大纲逐集 upsert
       for (const ep of outline.episodes) {
-        const existing = episodes.find(e => e.episode_number === ep.episode_number)
+        const existing = latestEpisodes.find(e => e.episode_number === ep.episode_number)
         if (existing) {
           await episodeApi.update(id, existing.id, { title: ep.title, synopsis: ep.synopsis })
         } else {
           await episodeApi.create(id, { title: ep.title, episode_number: ep.episode_number, synopsis: ep.synopsis })
         }
       }
+
       const res = await episodeApi.list(id)
       setEpisodes(res.data)
     } finally {
@@ -96,6 +111,35 @@ export default function ProjectDetail() {
   }
 
   const [generatingNext, setGeneratingNext] = useState(false)
+  const [selectedEpisodes, setSelectedEpisodes] = useState<Set<number>>(new Set())
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDeleteEpisode = async (episodeId: number) => {
+    if (!confirm('确认删除该分集？')) return
+    try {
+      await episodeApi.delete(id, episodeId)
+      setEpisodes(prev => prev.filter(e => e.id !== episodeId))
+      setSelectedEpisodes(prev => { const s = new Set(prev); s.delete(episodeId); return s })
+    } catch (e: any) {
+      alert('删除失败：' + (e?.response?.data?.detail ?? e?.message ?? '未知错误'))
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    if (selectedEpisodes.size === 0 || !confirm(`确认删除选中的 ${selectedEpisodes.size} 个分集？`)) return
+    setDeleting(true)
+    try {
+      for (const epId of selectedEpisodes) {
+        await episodeApi.delete(id, epId)
+      }
+      setEpisodes(prev => prev.filter(e => !selectedEpisodes.has(e.id)))
+      setSelectedEpisodes(new Set())
+    } catch (e: any) {
+      alert('批量删除失败：' + (e?.response?.data?.detail ?? e?.message ?? '未知错误'))
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const handleGenerateNext = async () => {
     setGeneratingNext(true)
@@ -173,6 +217,31 @@ export default function ProjectDetail() {
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    const lines: string[] = [`【${project?.title}】`, '']
+                    if (project?.synopsis) lines.push(`故事梗概：${project.synopsis}`, '')
+                    if (outline) {
+                      lines.push(`大纲主题：${outline.theme}`, '')
+                      outline.episodes.forEach(ep => {
+                        lines.push(`E${ep.episode_number} ${ep.title}`)
+                        lines.push(ep.synopsis, '')
+                      })
+                    } else {
+                      episodes.forEach(ep => {
+                        lines.push(`E${ep.episode_number} ${ep.title}`)
+                        if (ep.synopsis) lines.push(ep.synopsis)
+                        lines.push('')
+                      })
+                    }
+                    exportTxt(lines.join('\n'), `${project?.title || '项目'}_大纲`)
+                  }}
+                  disabled={!project}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  导出
+                </button>
                 <input
                   className="input"
                   type="number"
@@ -228,7 +297,24 @@ export default function ProjectDetail() {
           {/* Block 2: Episode list */}
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
             <div>
-              <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>分集管理</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>分集管理</h2>
+                {episodes.length > 0 && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedEpisodes.size === episodes.length && episodes.length > 0}
+                      onChange={e => setSelectedEpisodes(e.target.checked ? new Set(episodes.map(ep => ep.id)) : new Set())}
+                    />
+                    全选
+                  </label>
+                )}
+                {selectedEpisodes.size > 0 && (
+                  <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={handleBatchDelete} disabled={deleting}>
+                    {deleting ? '删除中…' : `删除选中 (${selectedEpisodes.size})`}
+                  </button>
+                )}
+              </div>
               <p className="page-subtitle">共 {episodes.length} 集</p>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -270,28 +356,45 @@ export default function ProjectDetail() {
           {episodes.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
               {episodes.map((ep) => (
-                <Link
-                  key={ep.id}
-                  to={`/projects/${id}/episodes/${ep.id}/script`}
-                  className="card"
-                  style={{ display: 'flex', alignItems: 'center', gap: 16, transition: 'border-color 0.15s' }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                >
-                  <div style={{
-                    width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-                    background: 'var(--bg-3)', border: '1px solid var(--border)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontWeight: 700, fontSize: 13, color: 'var(--accent)',
-                  }}>
-                    {ep.episode_number}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)' }}>{ep.title}</div>
-                    {ep.synopsis && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>{ep.synopsis}</div>}
-                  </div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ color: 'var(--text-3)' }}><path d="M9 18l6-6-6-6"/></svg>
-                </Link>
+                <div key={ep.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedEpisodes.has(ep.id)}
+                    onChange={e => setSelectedEpisodes(prev => {
+                      const s = new Set(prev)
+                      e.target.checked ? s.add(ep.id) : s.delete(ep.id)
+                      return s
+                    })}
+                  />
+                  <Link
+                    to={`/projects/${id}/episodes/${ep.id}/script`}
+                    className="card"
+                    style={{ display: 'flex', alignItems: 'center', gap: 16, transition: 'border-color 0.15s', flex: 1 }}
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                  >
+                    <div style={{
+                      width: 40, height: 40, borderRadius: 8, flexShrink: 0,
+                      background: 'var(--bg-3)', border: '1px solid var(--border)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontWeight: 700, fontSize: 13, color: 'var(--accent)',
+                    }}>
+                      {ep.episode_number}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)' }}>{ep.title}</div>
+                      {ep.synopsis && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>{ep.synopsis}</div>}
+                    </div>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ color: 'var(--text-3)' }}><path d="M9 18l6-6-6-6"/></svg>
+                  </Link>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: 12, color: 'var(--danger)', borderColor: 'var(--danger)', flexShrink: 0 }}
+                    onClick={() => handleDeleteEpisode(ep.id)}
+                  >
+                    删除
+                  </button>
+                </div>
               ))}
             </div>
           )}

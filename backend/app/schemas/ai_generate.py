@@ -16,14 +16,14 @@ class GenerateScriptRequest(BaseModel):
 
 
 class BatchGenerateRequest(BaseModel):
-    project_id: int
+    project_id: Optional[int] = None
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
     only_missing: bool = False
 
 
 class GenerateNextEpisodeRequest(BaseModel):
-    project_id: int
+    project_id: Optional[int] = None
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
 

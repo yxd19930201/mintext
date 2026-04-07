@@ -1,8 +1,14 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { conversionApi } from '../services/api/conversionApi'
+import { projectApi } from '../services/api/projectApi'
+import { episodeApi } from '../services/api/episodeApi'
+import { scriptApi } from '../services/api/scriptApi'
+import { exportTxt } from '../utils/export'
 import type { ConversionEpisode, VideoScriptScene } from '../types/models'
 
 export default function NovelToScript() {
+  const navigate = useNavigate()
   const [novelText, setNovelText] = useState('')
   const [targetEpisodes, setTargetEpisodes] = useState(5)
   const [style, setStyle] = useState('')
@@ -11,6 +17,7 @@ export default function NovelToScript() {
   const [selectedEpisode, setSelectedEpisode] = useState<ConversionEpisode | null>(null)
   const [videoScenes, setVideoScenes] = useState<VideoScriptScene[]>([])
   const [convertingToVideo, setConvertingToVideo] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const handleConvertToScript = async () => {
     if (!novelText.trim()) {
@@ -57,6 +64,33 @@ export default function NovelToScript() {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
     alert('已复制到剪贴板')
+  }
+
+  const handleSaveToProject = async () => {
+    if (episodes.length === 0) return
+    setSaving(true)
+    try {
+      const projRes = await projectApi.create({
+        title: `短剧项目 ${new Date().toLocaleDateString('zh-CN')}`,
+        synopsis: novelText.slice(0, 500),
+        total_episodes: episodes.length,
+      })
+      const projectId = projRes.data!.id
+      for (const ep of episodes) {
+        const epRes = await episodeApi.create(projectId, {
+          title: ep.title,
+          episode_number: ep.episode_number,
+          synopsis: ep.script.slice(0, 200),
+        })
+        await scriptApi.create(epRes.data!.id, { content: ep.script })
+      }
+      alert(`已保存为项目，共 ${episodes.length} 集`)
+      navigate(`/projects/${projectId}`)
+    } catch (e) {
+      alert('保存失败: ' + String(e))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -123,8 +157,34 @@ export default function NovelToScript() {
       {/* Step 2: Script Results */}
       {episodes.length > 0 && (
         <div className="card" style={{ marginBottom: 24 }}>
-          <div style={{ fontWeight: 600, marginBottom: 16, fontSize: 15 }}>
-            步骤 2：短剧剧本（共 {episodes.length} 集）
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>
+              步骤 2：短剧剧本（共 {episodes.length} 集）
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveToProject}
+                disabled={saving}
+              >
+                {saving ? '保存中...' : '保存到项目'}
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  const lines: string[] = []
+                  episodes.forEach(ep => {
+                    lines.push(`=== 第 ${ep.episode_number} 集：${ep.title} ===`)
+                    lines.push(`预计时长：${ep.duration_estimate}`, ``)
+                    lines.push(ep.script, ``)
+                  })
+                  exportTxt(lines.join('\n'), '短剧剧本')
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                导出全部剧本
+              </button>
+            </div>
           </div>
 
           <div style={{ display: 'grid', gap: 16 }}>
@@ -145,6 +205,13 @@ export default function NovelToScript() {
                       onClick={() => copyToClipboard(episode.script)}
                     >
                       复制剧本
+                    </button>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => exportTxt(episode.script, `第${episode.episode_number}集_${episode.title}`)}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      导出
                     </button>
                     <button
                       className="btn btn-sm btn-primary"
@@ -177,8 +244,28 @@ export default function NovelToScript() {
       {/* Step 3: Video Script */}
       {videoScenes.length > 0 && selectedEpisode && (
         <div className="card">
-          <div style={{ fontWeight: 600, marginBottom: 16, fontSize: 15 }}>
-            步骤 3：Seedance 2.0 视频生成脚本
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>
+              步骤 3：Seedance 2.0 视频生成脚本
+            </div>
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                const lines: string[] = [
+                  `=== 第 ${selectedEpisode.episode_number} 集：${selectedEpisode.title} ===`,
+                  `视频脚本 · 共 ${videoScenes.length} 个场景`, ``
+                ]
+                videoScenes.forEach(sc => {
+                  lines.push(`【场景 ${sc.scene_number}】`)
+                  lines.push(`描述：${sc.description}`)
+                  lines.push(`时长：${sc.duration}  镜头：${sc.camera_angle}  光线：${sc.lighting}`, ``)
+                })
+                exportTxt(lines.join('\n'), `第${selectedEpisode.episode_number}集_视频脚本`)
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              导出视频脚本
+            </button>
           </div>
           <div style={{ fontSize: 13, color: '#666', marginBottom: 16 }}>
             第 {selectedEpisode.episode_number} 集：{selectedEpisode.title} - 共 {videoScenes.length} 个场景

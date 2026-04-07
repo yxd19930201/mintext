@@ -24,7 +24,7 @@ class ConversionService:
         ai_config = None
         if req.ai_config_id:
             ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config or ai_config.owner_id != owner_id:
+            if not ai_config:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
 
         # Build system prompt
@@ -102,7 +102,7 @@ class ConversionService:
         ai_config = None
         if req.ai_config_id:
             ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config or ai_config.owner_id != owner_id:
+            if not ai_config:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
 
         # Build system prompt

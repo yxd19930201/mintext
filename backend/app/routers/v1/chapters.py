@@ -146,7 +146,6 @@ async def update_chapter_content(
         # Create new content
         content = await content_repo.create(
             chapter_id=chapter_id,
-            word_count=update_data.get('word_count', 0),
             **update_data
         )
 

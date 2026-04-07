@@ -41,7 +41,7 @@ class NovelGenerateService:
         ai_config = None
         if req.ai_config_id:
             ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config or ai_config.owner_id != owner_id:
+            if not ai_config:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
 
         # Generate outline
@@ -96,7 +96,7 @@ class NovelGenerateService:
         ai_config = None
         if req.ai_config_id:
             ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config or ai_config.owner_id != owner_id:
+            if not ai_config:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
         elif novel.ai_config_id:
             ai_config = await self.ai_config_repo.get(novel.ai_config_id)
@@ -242,7 +242,7 @@ class NovelGenerateService:
         ai_config = None
         if req.ai_config_id:
             ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config or ai_config.owner_id != owner_id:
+            if not ai_config:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
         elif novel.ai_config_id:
             ai_config = await self.ai_config_repo.get(novel.ai_config_id)

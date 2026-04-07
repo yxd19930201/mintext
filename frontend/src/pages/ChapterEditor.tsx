@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { transport } from '../services/api'
 import { novelAiApi } from '../services/api/novelAiApi'
-import type { Chapter, ChapterContent } from '../types/models'
+import { exportTxt } from '../utils/export'
+import type { Chapter } from '../types/models'
 
 export default function ChapterEditor() {
   const { novelId, chapterId } = useParams<{ novelId: string; chapterId: string }>()
@@ -11,6 +12,7 @@ export default function ChapterEditor() {
   const [wordCount, setWordCount] = useState(0)
   const [status, setStatus] = useState('draft')
   const [loading, setLoading] = useState(true)
+  const [noContent, setNoContent] = useState(false)
   const [saving, setSaving] = useState(false)
   const [generating, setGenerating] = useState(false)
 
@@ -38,16 +40,20 @@ export default function ChapterEditor() {
 
   const fetchContent = async () => {
     setLoading(true)
+    setNoContent(false)
     try {
-      // Fetch latest chapter content
       const res = await transport.get<any>(`/novels/${novelId}/chapters/${chapterId}/content`)
       if (res.data) {
         setContent(res.data.content || '')
         setWordCount(res.data.word_count || 0)
         setStatus(res.data.status || 'draft')
       }
-    } catch (e) {
-      console.error('Failed to fetch content', e)
+    } catch (e: any) {
+      if (e?.response?.status === 404) {
+        setNoContent(true)
+      } else {
+        console.error('Failed to fetch content', e)
+      }
     } finally {
       setLoading(false)
     }
@@ -78,6 +84,7 @@ export default function ChapterEditor() {
         setContent(res.data.content)
         setWordCount(res.data.word_count)
         setStatus('generated')
+        setNoContent(false)
         alert('生成成功！')
       }
     } catch (e) {
@@ -111,6 +118,13 @@ export default function ChapterEditor() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" onClick={() => {
+              const filename = chapter ? `第${chapter.chapter_number}章_${chapter.title}` : `章节${chapterId}`
+              exportTxt(content, filename)
+            }} disabled={!content}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              导出
+            </button>
             <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
               {generating ? '生成中...' : 'AI 生成内容'}
             </button>
@@ -120,6 +134,11 @@ export default function ChapterEditor() {
           </div>
         </div>
 
+        {noContent && (
+          <div style={{ padding: '12px 16px', background: '#fffbeb', borderRadius: 6, marginBottom: 12, fontSize: 13, color: '#92400e' }}>
+            本章暂无内容，点击「AI 生成内容」自动生成，或直接在下方编辑。
+          </div>
+        )}
         <textarea
           className="textarea"
           value={content}

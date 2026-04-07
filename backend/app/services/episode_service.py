@@ -19,7 +19,7 @@ class EpisodeService:
 
     async def list_episodes(self, project_id: int, owner_id: int) -> List[EpisodeRead]:
         await self._check_project(project_id, owner_id)
-        episodes = await self.repo.list(project_id=project_id)
+        episodes = await self.repo.list(project_id=project_id, limit=1000)
         return [EpisodeRead.model_validate(e) for e in episodes]
 
     async def create_episode(self, project_id: int, data: EpisodeCreate, owner_id: int) -> EpisodeRead:

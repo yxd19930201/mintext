@@ -15,7 +15,7 @@ class BaseRepository(Generic[ModelT]):
         result = await self.db.execute(select(self.model).where(self.model.id == id))
         return result.scalar_one_or_none()
 
-    async def list(self, skip: int = 0, limit: int = 20, **filters: Any) -> List[ModelT]:
+    async def list(self, skip: int = 0, limit: int = 1000, **filters: Any) -> List[ModelT]:
         q = select(self.model)
         for key, val in filters.items():
             q = q.where(getattr(self.model, key) == val)
@@ -45,5 +45,5 @@ class BaseRepository(Generic[ModelT]):
         return obj
 
     async def delete(self, obj: ModelT) -> None:
-        await self.db.delete(obj)
+        self.db.delete(obj)
         await self.db.flush()

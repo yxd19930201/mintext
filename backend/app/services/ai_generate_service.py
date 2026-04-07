@@ -119,7 +119,7 @@ class AIGenerateService:
         if not project or project.owner_id != owner_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-        episodes = await self.episode_repo.list(project_id=req.project_id)
+        episodes = await self.episode_repo.list(project_id=req.project_id, limit=1000)
         # 按集号排序，保证衔接上下文按顺序生成
         episodes.sort(key=lambda e: e.episode_number)
 
@@ -163,7 +163,7 @@ class AIGenerateService:
         system_prompt = req.system_prompt or project.system_prompt
 
         # 找到当前最后一集
-        episodes = await self.episode_repo.list(project_id=req.project_id)
+        episodes = await self.episode_repo.list(project_id=req.project_id, limit=1000)
         episodes.sort(key=lambda e: e.episode_number)
         next_number = (episodes[-1].episode_number + 1) if episodes else 1
         last_ep = episodes[-1] if episodes else None
