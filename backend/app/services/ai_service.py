@@ -72,27 +72,8 @@ class AIService:
         )
         messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}]
         raw = await self._call(messages, base_url, api_key, model, json_mode=True)
-        cleaned = raw.strip()
-        # Strip markdown code fences if present
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r'^```[a-zA-Z]*\n?', '', cleaned)
-            cleaned = re.sub(r'\n?```$', '', cleaned).strip()
-        try:
-            json.loads(cleaned)
-            return cleaned
-        except json.JSONDecodeError:
-            match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-            if match:
-                candidate = match.group(0)
-                try:
-                    json.loads(candidate)
-                    return candidate
-                except json.JSONDecodeError:
-                    pass
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"AI returned invalid JSON for outline. Raw response: {raw[:300]}"
-            )
+        parsed = self._parse_json_response(raw, "outline")
+        return json.dumps(parsed, ensure_ascii=False)
 
     async def generate_script(
         self,
@@ -127,52 +108,118 @@ class AIService:
         messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}]
         return await self._call(messages, base_url, api_key, model)
 
+    def _parse_json_response(self, raw: str, context: str) -> dict:
+        """Parse JSON from AI response, stripping markdown fences if needed."""
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r'^```[a-zA-Z]*\n?', '', cleaned)
+            cleaned = re.sub(r'\n?```$', '', cleaned).strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    pass
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI returned invalid JSON for {context}. Raw response: {raw[:300]}"
+        )
+
+    async def _generate_chapters_range(
+        self,
+        title: str,
+        genre: str | None,
+        synopsis: str,
+        total_chapters: int,
+        start: int,
+        end: int,
+        theme: str,
+        sys_msg: str,
+        base_url: str,
+        api_key: str,
+        model: str,
+    ) -> tuple[list[dict], str]:
+        """Generate chapters [start, end] as a single AI call. Returns list of chapter dicts."""
+        theme_hint = f"\n核心主题（请保持一致）：{theme}" if theme else ""
+        count = end - start + 1
+        user_msg = (
+            f"请为以下小说创作第 {start}~{end} 章的章节大纲（共 {total_chapters} 章，本次只生成这 {count} 章）。\n"
+            f"小说名：{title}\n"
+            f"类型：{genre or '不限'}\n"
+            f"故事大概：{synopsis}{theme_hint}\n\n"
+            f"严格只输出第 {start} 到第 {end} 章，纯 JSON，不要任何其他文字：\n"
+            '{"total_chapters": ' + str(total_chapters) + ', "theme": "核心主题", "chapters": ['
+            '{"chapter_number": ' + str(start) + ', "title": "章节标题", "synopsis": "本章简介"}'
+            + (', ...' if count > 1 else '') + ']}'
+        )
+        messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}]
+        raw = await self._call(messages, base_url, api_key, model, json_mode=True)
+        parsed = self._parse_json_response(raw, f"chapters {start}-{end}")
+        return parsed.get("chapters", []), parsed.get("theme", theme)
+
     async def generate_novel_outline(
         self,
         title: str,
         genre: str | None,
         synopsis: str,
         total_chapters: int,
+        start_chapter: int = 1,
+        end_chapter: int | None = None,
+        theme: str = "",
         system_prompt: str | None = None,
         ai_config: AIConfig | None = None,
     ) -> str:
-        """Generate novel chapter outline JSON string."""
+        """Generate novel chapter outline for [start_chapter, end_chapter].
+        On JSON parse failure, automatically falls back to chapter-by-chapter generation."""
         base_url, api_key, model = self._resolve(ai_config)
+        end = end_chapter or total_chapters
         sys_msg = system_prompt or (
             "你是一位专业的网络小说作家，擅长创作引人入胜的长篇小说大纲。"
             "请严格按照用户要求的 JSON 格式输出，不要添加任何额外说明。"
         )
-        user_msg = (
-            f"请为以下小说创作章节大纲，共 {total_chapters} 章。\n"
-            f"小说名：{title}\n"
-            f"类型：{genre or '不限'}\n"
-            f"故事大概：{synopsis}\n\n"
-            "请以纯 JSON 格式返回，格式如下（不要有任何其他文字）：\n"
-            '{"total_chapters": N, "theme": "核心主题", "chapters": ['
-            '{"chapter_number": 1, "title": "章节标题", "synopsis": "本章简介"}, ...]}'
-        )
-        messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}]
-        raw = await self._call(messages, base_url, api_key, model, json_mode=True)
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r'^```[a-zA-Z]*\n?', '', cleaned)
-            cleaned = re.sub(r'\n?```$', '', cleaned).strip()
+
+        all_chapters: list[dict] = []
+        current_theme = theme
+
+        # Try the whole range first; on failure fall back to one-by-one
         try:
-            json.loads(cleaned)
-            return cleaned
-        except json.JSONDecodeError:
-            match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-            if match:
-                candidate = match.group(0)
-                try:
-                    json.loads(candidate)
-                    return candidate
-                except json.JSONDecodeError:
-                    pass
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"AI returned invalid JSON for novel outline. Raw response: {raw[:300]}"
+            chapters, current_theme = await self._generate_chapters_range(
+                title, genre, synopsis, total_chapters,
+                start_chapter, end, current_theme, sys_msg, base_url, api_key, model,
             )
+            all_chapters = chapters
+        except HTTPException:
+            # Fallback: generate one chapter at a time
+            for ch_num in range(start_chapter, end + 1):
+                for attempt in range(3):
+                    try:
+                        chapters, fetched_theme = await self._generate_chapters_range(
+                            title, genre, synopsis, total_chapters,
+                            ch_num, ch_num, current_theme, sys_msg, base_url, api_key, model,
+                        )
+                        if chapters:
+                            all_chapters.extend(chapters)
+                            if not current_theme and fetched_theme:
+                                current_theme = fetched_theme
+                        break
+                    except HTTPException:
+                        if attempt == 2:
+                            # Give up on this chapter, insert placeholder
+                            all_chapters.append({
+                                "chapter_number": ch_num,
+                                "title": f"第{ch_num}章",
+                                "synopsis": "（生成失败，请手动补充）",
+                            })
+
+        result = {
+            "total_chapters": total_chapters,
+            "theme": current_theme,
+            "chapters": all_chapters,
+        }
+        return json.dumps(result, ensure_ascii=False)
 
     async def generate_chapter(
         self,

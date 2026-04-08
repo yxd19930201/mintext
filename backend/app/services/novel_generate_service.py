@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
@@ -22,6 +23,8 @@ from app.schemas.novel_generate import (
     GenerateNextChapterResult,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class NovelGenerateService:
     def __init__(self, db: AsyncSession):
@@ -32,52 +35,87 @@ class NovelGenerateService:
         self.ai_config_repo = AIConfigRepository(db)
 
     async def generate_outline(self, req: GenerateNovelOutlineRequest, owner_id: int) -> OutlineResult:
-        # Verify novel ownership
+        logger.info(f"generate_outline start: novel_id={req.novel_id}, total_chapters={req.total_chapters}, "
+                    f"start={req.start_chapter}, end={req.end_chapter}, owner_id={owner_id}")
         novel = await self.novel_repo.get_by_id_and_owner(req.novel_id, owner_id)
         if not novel:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Novel not found")
 
-        # Get AI config
         ai_config = None
         if req.ai_config_id:
             ai_config = await self.ai_config_repo.get(req.ai_config_id)
             if not ai_config:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
+        elif novel.ai_config_id:
+            ai_config = await self.ai_config_repo.get(novel.ai_config_id)
+        if not ai_config:
+            ai_config = await self.ai_config_repo.get_default()
 
-        # Generate outline
-        outline_json = await ai_service.generate_novel_outline(
-            title=novel.title,
-            genre=novel.genre,
-            synopsis=novel.synopsis,
-            total_chapters=req.total_chapters,
-            system_prompt=req.system_prompt or novel.system_prompt,
-            ai_config=ai_config,
-        )
+        logger.info(f"Using AI config: {ai_config.name if ai_config else 'None'}")
 
-        # Parse and validate
+        end_chapter = req.end_chapter or req.total_chapters
+        is_partial = end_chapter < req.total_chapters
+
         try:
-            outline_data = json.loads(outline_json)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to parse outline JSON")
+            outline_json = await ai_service.generate_novel_outline(
+                title=novel.title,
+                genre=novel.genre,
+                synopsis=novel.synopsis,
+                total_chapters=req.total_chapters,
+                start_chapter=req.start_chapter,
+                end_chapter=end_chapter,
+                theme=req.theme or "",
+                system_prompt=req.system_prompt or novel.system_prompt,
+                ai_config=ai_config,
+            )
+            logger.info(f"generate_novel_outline success, json length={len(outline_json)}")
+        except Exception as e:
+            logger.error(f"generate_novel_outline failed: {e}", exc_info=True)
+            raise
 
-        # Save to novel
-        novel = await self.novel_repo.update(novel, outline=outline_json, total_chapters=req.total_chapters)
+        outline_data = json.loads(outline_json)
+
+        # Merge into existing outline stored on novel (append new chapters)
+        existing_chapters: list = []
+        existing_theme = ""
+        if novel.outline:
+            try:
+                existing = json.loads(novel.outline)
+                existing_chapters = existing.get("chapters", [])
+                existing_theme = existing.get("theme", "")
+            except Exception:
+                pass
+
+        new_chapters = outline_data.get("chapters", [])
+        new_chapter_numbers = {ch["chapter_number"] for ch in new_chapters}
+        merged_chapters = [ch for ch in existing_chapters if ch["chapter_number"] not in new_chapter_numbers]
+        merged_chapters.extend(new_chapters)
+        merged_chapters.sort(key=lambda c: c["chapter_number"])
+
+        merged_theme = outline_data.get("theme") or existing_theme
+        merged_outline = {
+            "total_chapters": req.total_chapters,
+            "theme": merged_theme,
+            "chapters": merged_chapters,
+        }
+        novel = await self.novel_repo.update(novel, outline=json.dumps(merged_outline, ensure_ascii=False),
+                                             total_chapters=req.total_chapters)
         await self.db.commit()
 
-        # Build response
         chapters = [
             ChapterOutlineItem(
                 chapter_number=ch["chapter_number"],
                 title=ch["title"],
-                synopsis=ch["synopsis"]
+                synopsis=ch["synopsis"],
             )
-            for ch in outline_data.get("chapters", [])
+            for ch in new_chapters
         ]
 
         return OutlineResult(
-            total_chapters=outline_data.get("total_chapters", req.total_chapters),
-            theme=outline_data.get("theme", ""),
+            total_chapters=req.total_chapters,
+            theme=merged_theme,
             chapters=chapters,
+            is_partial=is_partial,
         )
 
     async def generate_chapter_content(
@@ -100,6 +138,8 @@ class NovelGenerateService:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
         elif novel.ai_config_id:
             ai_config = await self.ai_config_repo.get(novel.ai_config_id)
+        if not ai_config:
+            ai_config = await self.ai_config_repo.get_default()
 
         # Build context
         context_parts = []
@@ -246,6 +286,8 @@ class NovelGenerateService:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
         elif novel.ai_config_id:
             ai_config = await self.ai_config_repo.get(novel.ai_config_id)
+        if not ai_config:
+            ai_config = await self.ai_config_repo.get_default()
 
         # Extract last 1000 characters for context
         snippet = last_content.content[-1000:]

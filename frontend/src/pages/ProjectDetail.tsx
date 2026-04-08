@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { episodeApi } from '../services/api/episodeApi'
 import { projectApi } from '../services/api/projectApi'
 import { aiApi } from '../services/api/aiApi'
+import { scriptApi } from '../services/api/scriptApi'
 import { exportTxt } from '../utils/export'
 import type { Episode, Project, OutlineEpisode, AIConfig, AIPromptPreset } from '../types/models'
 
@@ -113,6 +114,7 @@ export default function ProjectDetail() {
   const [generatingNext, setGeneratingNext] = useState(false)
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<number>>(new Set())
   const [deleting, setDeleting] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const handleDeleteEpisode = async (episodeId: number) => {
     if (!confirm('确认删除该分集？')) return
@@ -138,6 +140,32 @@ export default function ProjectDetail() {
       alert('批量删除失败：' + (e?.response?.data?.detail ?? e?.message ?? '未知错误'))
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleBatchExport = async () => {
+    if (selectedEpisodes.size === 0) return
+    setExporting(true)
+    try {
+      const selected = episodes.filter(ep => selectedEpisodes.has(ep.id))
+        .sort((a, b) => a.episode_number - b.episode_number)
+      const lines: string[] = [`【${project?.title ?? ''}】剧本导出`, '']
+      for (const ep of selected) {
+        const res = await scriptApi.list(ep.id)
+        const scripts = res.data ?? []
+        const latest = scripts[scripts.length - 1]
+        lines.push(`${'='.repeat(40)}`)
+        lines.push(`E${ep.episode_number} ${ep.title}`)
+        if (ep.synopsis) lines.push(`简介：${ep.synopsis}`)
+        lines.push('')
+        lines.push(latest?.content?.trim() || '（暂无剧本内容）')
+        lines.push('')
+      }
+      exportTxt(lines.join('\n'), `${project?.title ?? '项目'}_剧本`)
+    } catch (e: any) {
+      alert('导出失败：' + (e?.response?.data?.detail ?? e?.message ?? '未知错误'))
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -310,9 +338,17 @@ export default function ProjectDetail() {
                   </label>
                 )}
                 {selectedEpisodes.size > 0 && (
-                  <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={handleBatchDelete} disabled={deleting}>
-                    {deleting ? '删除中…' : `删除选中 (${selectedEpisodes.size})`}
-                  </button>
+                  <>
+                    <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={handleBatchDelete} disabled={deleting}>
+                      {deleting ? '删除中…' : `删除选中 (${selectedEpisodes.size})`}
+                    </button>
+                    <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleBatchExport} disabled={exporting}>
+                      {exporting
+                        ? <><span className="spinner" style={{ width: 12, height: 12 }} /> 导出中…</>
+                        : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出剧本 ({selectedEpisodes.size})</>
+                      }
+                    </button>
+                  </>
                 )}
               </div>
               <p className="page-subtitle">共 {episodes.length} 集</p>

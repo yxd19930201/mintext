@@ -5,7 +5,7 @@ export class HttpTransport implements ITransport {
   private client: AxiosInstance
 
   constructor(baseURL = '/api/v1') {
-    this.client = axios.create({ baseURL })
+    this.client = axios.create({ baseURL, timeout: 600000 })
 
     this.client.interceptors.request.use((config) => {
       const token = localStorage.getItem('access_token')

@@ -35,22 +35,66 @@ export default function NovelDetail() {
     }
   }, [currentNovel])
 
+  const [generatingProgress, setGeneratingProgress] = useState<{ done: number; total: number } | null>(null)
+
   const handleGenerateOutline = async () => {
     if (!novelId || !currentNovel) return
     setGenerating(true)
+    setOutline([])
+    setGeneratingProgress({ done: 0, total: totalChapters })
+
+    const BATCH = 5
+    let accumulated: ChapterOutlineItem[] = []
+
     try {
-      const res = await novelAiApi.generateOutline({
+      // First batch to get the theme
+      const firstEnd = Math.min(BATCH, totalChapters)
+      const firstRes = await novelAiApi.generateOutline({
         novel_id: Number(novelId),
         total_chapters: totalChapters,
+        start_chapter: 1,
+        end_chapter: firstEnd,
       })
-      if (res.data) {
-        setOutline(res.data.chapters)
-        await fetchNovel(Number(novelId))
+      const theme = firstRes.data?.theme || ''
+      accumulated = [...(firstRes.data?.chapters || [])]
+      setOutline([...accumulated])
+      setGeneratingProgress({ done: firstEnd, total: totalChapters })
+
+      // Remaining batches in parallel groups of 4
+      const remaining: Array<{ start: number; end: number }> = []
+      for (let start = firstEnd + 1; start <= totalChapters; start += BATCH) {
+        remaining.push({ start, end: Math.min(start + BATCH - 1, totalChapters) })
       }
+
+      const CONCURRENCY = 4
+      for (let i = 0; i < remaining.length; i += CONCURRENCY) {
+        const group = remaining.slice(i, i + CONCURRENCY)
+        const results = await Promise.all(
+          group.map(({ start, end }) =>
+            novelAiApi.generateOutline({
+              novel_id: Number(novelId),
+              total_chapters: totalChapters,
+              start_chapter: start,
+              end_chapter: end,
+              theme,
+            })
+          )
+        )
+        for (const res of results) {
+          if (res.data?.chapters) accumulated.push(...res.data.chapters)
+        }
+        accumulated.sort((a, b) => a.chapter_number - b.chapter_number)
+        setOutline([...accumulated])
+        const lastDone = group[group.length - 1].end
+        setGeneratingProgress({ done: lastDone, total: totalChapters })
+      }
+
+      await fetchNovel(Number(novelId))
     } catch (e) {
       alert('生成大纲失败: ' + String(e))
     } finally {
       setGenerating(false)
+      setGeneratingProgress(null)
     }
   }
 
@@ -209,7 +253,11 @@ export default function NovelDetail() {
             />
           </div>
           <button className="btn btn-primary" onClick={handleGenerateOutline} disabled={generating}>
-            {generating ? '生成中...' : 'AI 生成大纲'}
+            {generating
+              ? generatingProgress
+                ? `生成中 ${generatingProgress.done}/${generatingProgress.total}...`
+                : '生成中...'
+              : 'AI 生成大纲'}
           </button>
           {outline.length > 0 && (
             <button className="btn" onClick={handleSyncToChapters}>

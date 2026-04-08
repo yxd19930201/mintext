@@ -31,6 +31,9 @@ export const novelAiApi = {
   generateOutline: (data: {
     novel_id: number
     total_chapters: number
+    start_chapter?: number
+    end_chapter?: number
+    theme?: string
     ai_config_id?: number
     system_prompt?: string
   }) =>
