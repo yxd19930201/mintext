@@ -68,6 +68,8 @@ export default function ChapterEditor() {
         status,
       })
       alert('保存成功！')
+      // Update knowledge graph in background (non-blocking)
+      novelAiApi.updateGraphFromChapter(Number(novelId), Number(chapterId)).catch(() => {})
     } catch (e) {
       alert('保存失败: ' + String(e))
     } finally {

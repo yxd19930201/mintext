@@ -12,6 +12,7 @@ class Novel(Base):
     genre = Column(String(50), nullable=True)
     synopsis = Column(Text, nullable=False)
     outline = Column(Text, nullable=True)  # JSON format
+    knowledge_graph = Column(Text, nullable=True)  # JSON: {characters:[...], events:[...]}
     total_chapters = Column(Integer, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     ai_config_id = Column(Integer, ForeignKey("ai_configs.id", ondelete="SET NULL"), nullable=True)

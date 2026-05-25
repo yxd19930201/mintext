@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useNovelStore } from '../stores/novelStore'
 import { novelAiApi } from '../services/api/novelAiApi'
+import type { KnowledgeGraph } from '../services/api/novelAiApi'
+import { novelApi } from '../services/api/novelApi'
 import { chapterApi } from '../services/api/chapterApi'
 import { exportTxt } from '../utils/export'
 import type { ChapterOutlineItem } from '../types/models'
@@ -10,12 +12,22 @@ export default function NovelDetail() {
   const { novelId } = useParams<{ novelId: string }>()
   const { currentNovel, chapters, loading, fetchNovel, fetchChapters, createChapter } = useNovelStore()
   const [outline, setOutline] = useState<ChapterOutlineItem[]>([])
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState<ChapterOutlineItem | null>(null)
+  const [savingOutline, setSavingOutline] = useState(false)
+  const [syncingIndex, setSyncingIndex] = useState<number | null>(null)
   const [generating, setGenerating] = useState(false)
   const [totalChapters, setTotalChapters] = useState(50)
   const [showAiPanel, setShowAiPanel] = useState(false)
   const [batchGenerating, setBatchGenerating] = useState(false)
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(new Set())
   const [deleting, setDeleting] = useState(false)
+
+  const [graph, setGraph] = useState<KnowledgeGraph | null>(null)
+  const [showGraph, setShowGraph] = useState(false)
+  const [graphLoading, setGraphLoading] = useState(false)
+  const [rebuildingGraph, setRebuildingGraph] = useState(false)
+  const [rebuildProgress, setRebuildProgress] = useState<{ done: number; total: number } | null>(null)
 
   useEffect(() => {
     if (novelId) {
@@ -98,6 +110,50 @@ export default function NovelDetail() {
     }
   }
 
+  const handleSaveOutlineEdit = async () => {
+    if (editingIndex === null || !editDraft || !novelId || !currentNovel) return
+    const updated = outline.map((item, i) => i === editingIndex ? editDraft : item)
+    setSavingOutline(true)
+    try {
+      const outlineJson = JSON.stringify({
+        total_chapters: updated.length,
+        theme: currentNovel.outline ? (JSON.parse(currentNovel.outline).theme || '') : '',
+        chapters: updated,
+      })
+      await novelApi.update(Number(novelId), { outline: outlineJson })
+      setOutline(updated)
+      setEditingIndex(null)
+      setEditDraft(null)
+    } catch (e) {
+      alert('保存失败: ' + String(e))
+    } finally {
+      setSavingOutline(false)
+    }
+  }
+
+  const handleSyncSingleChapter = async (item: ChapterOutlineItem) => {
+    if (!novelId) return
+    setSyncingIndex(item.chapter_number)
+    try {
+      const latestRes = await chapterApi.list(Number(novelId))
+      const existing = (latestRes.data || []).find(c => c.chapter_number === item.chapter_number)
+      if (existing) {
+        await chapterApi.update(Number(novelId), existing.id, { title: item.title, synopsis: item.synopsis })
+      } else {
+        await createChapter(Number(novelId), {
+          title: item.title,
+          chapter_number: item.chapter_number,
+          synopsis: item.synopsis,
+        })
+      }
+      await fetchChapters(Number(novelId))
+    } catch (e) {
+      alert('同步失败: ' + String(e))
+    } finally {
+      setSyncingIndex(null)
+    }
+  }
+
   const handleSyncToChapters = async () => {
     if (!novelId || outline.length === 0) return
     try {
@@ -174,6 +230,60 @@ export default function NovelDetail() {
       alert('批量删除失败: ' + String(e))
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleLoadGraph = async () => {
+    if (!novelId) return
+    setGraphLoading(true)
+    try {
+      const res = await novelAiApi.getGraph(Number(novelId))
+      setGraph(res.data || { characters: [], events: [] })
+      setShowGraph(true)
+    } catch (e) {
+      alert('加载图谱失败: ' + String(e))
+    } finally {
+      setGraphLoading(false)
+    }
+  }
+
+  const handleRebuildGraph = async () => {
+    if (!novelId || !confirm('将重新分析所有已生成章节内容来重建图谱，可能需要几分钟，确认继续？')) return
+    setRebuildingGraph(true)
+    setRebuildProgress(null)
+    try {
+      await novelAiApi.clearGraph(Number(novelId))
+      setGraph({ characters: [], events: [] })
+
+      const chaptersRes = await novelAiApi.getChaptersWithContent(Number(novelId))
+      const chapters = chaptersRes.data || []
+      if (chapters.length === 0) {
+        alert('没有已生成内容的章节')
+        return
+      }
+
+      setRebuildProgress({ done: 0, total: chapters.length })
+
+      for (let i = 0; i < chapters.length; i++) {
+        const ch = chapters[i]
+        try {
+          const res = await novelAiApi.updateGraphFromChapter(Number(novelId), ch.id)
+          if (res.data) {
+            setGraph(res.data)
+          }
+          setRebuildProgress({ done: i + 1, total: chapters.length })
+        } catch (e) {
+          console.error(`Failed to update graph for chapter ${ch.chapter_number}:`, e)
+        }
+      }
+
+      setShowGraph(true)
+      alert('图谱重建完成！')
+    } catch (e) {
+      alert('重建图谱失败: ' + String(e))
+    } finally {
+      setRebuildingGraph(false)
+      setRebuildProgress(null)
     }
   }
 
@@ -266,13 +376,138 @@ export default function NovelDetail() {
           )}
         </div>
         {outline.length > 0 && (
-          <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 6, padding: 12 }}>
-            {outline.map(item => (
+          <div style={{ maxHeight: 400, overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 6, padding: 12 }}>
+            {outline.map((item, i) => (
               <div key={item.chapter_number} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #f0f0f0' }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>第 {item.chapter_number} 章：{item.title}</div>
-                <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{item.synopsis}</div>
+                {editingIndex === i ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <input
+                      className="input"
+                      style={{ fontSize: 13, fontWeight: 600 }}
+                      value={editDraft?.title || ''}
+                      onChange={e => setEditDraft(d => d ? { ...d, title: e.target.value } : d)}
+                    />
+                    <textarea
+                      className="textarea"
+                      style={{ fontSize: 12, minHeight: 60 }}
+                      value={editDraft?.synopsis || ''}
+                      onChange={e => setEditDraft(d => d ? { ...d, synopsis: e.target.value } : d)}
+                    />
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="btn btn-primary btn-sm" onClick={handleSaveOutlineEdit} disabled={savingOutline}>
+                        {savingOutline ? '保存中...' : '保存'}
+                      </button>
+                      <button className="btn btn-sm" onClick={() => { setEditingIndex(null); setEditDraft(null) }}>取消</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>第 {item.chapter_number} 章：{item.title}</div>
+                      <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{item.synopsis}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                      <button
+                        className="btn btn-sm"
+                        style={{ fontSize: 11 }}
+                        onClick={() => { setEditingIndex(i); setEditDraft({ ...item }) }}
+                      >编辑</button>
+                      <button
+                        className="btn btn-sm"
+                        style={{ fontSize: 11 }}
+                        onClick={() => handleSyncSingleChapter(item)}
+                        disabled={syncingIndex === item.chapter_number}
+                      >
+                        {syncingIndex === item.chapter_number ? '同步中...' : '同步'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Knowledge Graph */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontWeight: 600 }}>图谱（人物关系 & 事件）</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm" onClick={handleLoadGraph} disabled={graphLoading}>
+              {graphLoading ? '加载中...' : showGraph ? '刷新' : '查看图谱'}
+            </button>
+            <button className="btn btn-sm" onClick={handleRebuildGraph} disabled={rebuildingGraph}>
+              {rebuildingGraph
+                ? rebuildProgress
+                  ? `分析中 ${rebuildProgress.done}/${rebuildProgress.total}...`
+                  : '准备中...'
+                : '重新分析'}
+            </button>
+          </div>
+        </div>
+
+        {showGraph && graph && (
+          <div style={{ marginTop: 16 }}>
+            {/* Characters */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#555' }}>
+                人物关系 ({graph.characters.length})
+              </div>
+              {graph.characters.length === 0 ? (
+                <div style={{ color: '#999', fontSize: 13 }}>暂无人物数据</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {graph.characters.map((char, i) => (
+                    <div key={i} style={{ background: '#f8f8f8', borderRadius: 6, padding: '10px 12px', fontSize: 13 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{char.name}</span>
+                        <span style={{ fontSize: 11, color: '#888', background: '#e8e8e8', borderRadius: 4, padding: '1px 6px' }}>{char.role}</span>
+                      </div>
+                      {char.description && <div style={{ color: '#555', marginBottom: 4 }}>{char.description}</div>}
+                      {char.relations.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {char.relations.map((r, j) => (
+                            <span key={j} style={{ fontSize: 11, color: '#666', background: '#efefef', borderRadius: 4, padding: '2px 6px' }}>
+                              {r.target} · {r.relation}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Events */}
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#555' }}>
+                关键事件 ({graph.events.length})
+              </div>
+              {graph.events.length === 0 ? (
+                <div style={{ color: '#999', fontSize: 13 }}>暂无事件数据</div>
+              ) : (
+                <div style={{ maxHeight: 300, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {graph.events.map((ev, i) => (
+                    <div key={i} style={{ background: '#f8f8f8', borderRadius: 6, padding: '8px 12px', fontSize: 13 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                        <span style={{ fontSize: 11, color: '#888', background: '#e8e8e8', borderRadius: 4, padding: '1px 6px' }}>第{ev.chapter}章</span>
+                        <span style={{ fontWeight: 600 }}>{ev.title}</span>
+                      </div>
+                      <div style={{ color: '#555' }}>{ev.description}</div>
+                      {ev.related_characters.length > 0 && (
+                        <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {ev.related_characters.map((c, j) => (
+                            <span key={j} style={{ fontSize: 11, color: '#666', background: '#efefef', borderRadius: 4, padding: '1px 6px' }}>{c}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -21,6 +21,7 @@ class NovelUpdate(BaseModel):
     genre: Optional[str] = Field(None, max_length=50)
     synopsis: Optional[str] = None
     outline: Optional[str] = None
+    knowledge_graph: Optional[str] = None
     total_chapters: Optional[int] = None
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
@@ -29,6 +30,7 @@ class NovelUpdate(BaseModel):
 class NovelRead(NovelBase):
     id: int
     outline: Optional[str] = None
+    knowledge_graph: Optional[str] = None
     owner_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None

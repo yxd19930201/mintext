@@ -228,11 +228,11 @@ class AIService:
         system_prompt: str | None = None,
         ai_config: AIConfig | None = None,
     ) -> str:
-        """Generate chapter content (approximately 3000 words)."""
+        """Generate chapter content (approximately 4000 words)."""
         base_url, api_key, model = self._resolve(ai_config)
         sys_msg = system_prompt or (
             "你是一位专业的网络小说作家，擅长创作情节紧凑、文笔流畅的小说章节。"
-            "每章内容约 3000 字，注重情节推进和人物刻画。"
+            "严格按照用户指定的字数范围写作，在字数范围内完整交代本章剧情，自然收尾，不要强行拖长。"
         )
         user_content = ""
         if context:
@@ -240,6 +240,38 @@ class AIService:
         user_content += f"请根据以下要求生成本章内容：\n{prompt}"
         messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_content}]
         return await self._call(messages, base_url, api_key, model)
+
+    async def update_knowledge_graph(
+        self,
+        chapter_content: str,
+        chapter_number: int,
+        chapter_title: str,
+        existing_graph: str = "",
+        ai_config: AIConfig | None = None,
+    ) -> str:
+        """Extract characters and events from chapter content, merge into existing graph."""
+        base_url, api_key, model = self._resolve(ai_config)
+        sys_msg = (
+            "你是一位专业的小说分析师，擅长从章节内容中提取人物关系。"
+            "请严格按照 JSON 格式输出，不要添加任何额外说明。"
+        )
+        existing_hint = f"\n\n已有图谱（必须完整保留所有已有人物，在此基础上新增本章内容）：\n{existing_graph[:2000]}" if existing_graph else ""
+        user_msg = (
+            f"请从以下第 {chapter_number} 章《{chapter_title}》的内容中，提取并更新人物关系。{existing_hint}\n\n"
+            f"章节内容：\n{chapter_content[:1500]}\n\n"
+            "提取规则：\n"
+            "1. 只记录与主角有直接互动或关系的人物（主角本人必须包含），忽略与主角无关的次要人物。\n"
+            "2. 删除只在一章中出现过一次、且对主角影响不重要的人物。\n"
+            "3. 已有图谱中多次出现的人物必须保留并更新描述，不得删除。\n"
+            "4. description 字段限制在30字以内，只写核心身份特征，不要罗列每章情节。\n\n"
+            "请以纯 JSON 格式返回完整图谱：\n"
+            '{"characters": [{"name": "人物名", "role": "身份/角色", "description": "简要描述(30字内)", '
+            '"relations": [{"target": "关联人物名", "relation": "关系描述"}]}]}'
+        )
+        messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}]
+        raw = await self._call(messages, base_url, api_key, model, json_mode=True)
+        parsed = self._parse_json_response(raw, "knowledge graph")
+        return json.dumps(parsed, ensure_ascii=False)
 
 
 ai_service = AIService()

@@ -145,6 +145,24 @@ class NovelGenerateService:
         context_parts = []
         context_parts.append(f"小说：{novel.title}\n故事大概：{novel.synopsis}")
 
+        # Inject knowledge graph (characters & events so far)
+        if novel.knowledge_graph:
+            try:
+                kg = json.loads(novel.knowledge_graph)
+                chars = kg.get("characters", [])
+                events = kg.get("events", [])
+                if chars or events:
+                    kg_lines = ["【已出现的人物关系】"]
+                    for c in chars:
+                        rels = "、".join(f"{r['target']}({r['relation']})" for r in c.get("relations", []))
+                        kg_lines.append(f"- {c['name']}（{c.get('role','')}）：{c.get('description','')}{'；关联：'+rels if rels else ''}")
+                    kg_lines.append("【已发生的关键事件】")
+                    for e in events[-20:]:  # last 20 events to avoid context overflow
+                        kg_lines.append(f"- 第{e.get('chapter','')}章 {e.get('title','')}：{e.get('description','')}")
+                    context_parts.append("\n".join(kg_lines))
+            except Exception:
+                pass
+
         # KEY LOGIC: Get previous chapter ending for continuity
         if chapter.chapter_number > 1:
             prev_chapter = await self.chapter_repo.get_by_number(novel.id, chapter.chapter_number - 1)
@@ -165,7 +183,7 @@ class NovelGenerateService:
         prompt = f"第 {chapter.chapter_number} 章：{chapter.title}\n"
         if chapter.synopsis:
             prompt += f"本章简介：{chapter.synopsis}\n"
-        prompt += "请生成约 3000 字的章节内容。"
+        prompt += "请在 4000 到 4500 字以内完整交代本章剧情，情节完整自然收尾，不要超过 4500 字。"
 
         # Generate content
         content = await ai_service.generate_chapter(
@@ -199,6 +217,20 @@ class NovelGenerateService:
             )
 
         await self.db.commit()
+
+        # Async update knowledge graph in background (non-blocking, best-effort)
+        try:
+            new_graph = await ai_service.update_knowledge_graph(
+                chapter_content=content,
+                chapter_number=chapter.chapter_number,
+                chapter_title=chapter.title,
+                existing_graph=novel.knowledge_graph or "",
+                ai_config=ai_config,
+            )
+            await self.novel_repo.update(novel, knowledge_graph=new_graph)
+            await self.db.commit()
+        except Exception:
+            pass  # graph update failure must not break chapter generation
 
         return GenerateChapterResult(
             chapter_id=chapter_id,

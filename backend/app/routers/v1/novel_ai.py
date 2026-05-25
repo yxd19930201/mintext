@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.services.novel_generate_service import NovelGenerateService
+from app.services.knowledge_graph_service import KnowledgeGraphService
 from app.schemas.novel_generate import (
     GenerateNovelOutlineRequest,
     GenerateChapterRequest,
@@ -59,4 +60,55 @@ async def generate_next_chapter(
     user_id: int = Depends(get_current_user_id),
 ):
     result = await NovelGenerateService(db).generate_next_chapter(novel_id, req, user_id)
+    return ApiResponse(data=result)
+
+
+@router.post("/graph/update-chapter/{novel_id}/{chapter_id}", response_model=ApiResponse[dict])
+async def update_graph_from_chapter(
+    novel_id: int,
+    chapter_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    result = await KnowledgeGraphService(db).update_graph_from_chapter(novel_id, chapter_id, user_id)
+    return ApiResponse(data=result)
+
+
+@router.get("/graph/{novel_id}/chapters", response_model=ApiResponse[list])
+async def get_chapters_with_content(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    result = await KnowledgeGraphService(db).get_chapters_with_content(novel_id, user_id)
+    return ApiResponse(data=result)
+
+
+@router.post("/graph/{novel_id}/clear", response_model=ApiResponse[dict])
+async def clear_knowledge_graph(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    result = await KnowledgeGraphService(db).clear_graph(novel_id, user_id)
+    return ApiResponse(data=result)
+
+
+@router.get("/graph/{novel_id}", response_model=ApiResponse[dict])
+async def get_knowledge_graph(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    result = await KnowledgeGraphService(db).get_graph(novel_id, user_id)
+    return ApiResponse(data=result)
+
+
+@router.post("/graph/rebuild/{novel_id}", response_model=ApiResponse[dict])
+async def rebuild_knowledge_graph(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    result = await KnowledgeGraphService(db).rebuild_graph(novel_id, user_id)
     return ApiResponse(data=result)

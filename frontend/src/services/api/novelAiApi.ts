@@ -27,6 +27,25 @@ export interface GenerateNextChapterResult {
   content_id: number
 }
 
+export interface KnowledgeGraphCharacter {
+  name: string
+  role: string
+  description: string
+  relations: Array<{ target: string; relation: string }>
+}
+
+export interface KnowledgeGraphEvent {
+  chapter: number
+  title: string
+  description: string
+  related_characters: string[]
+}
+
+export interface KnowledgeGraph {
+  characters: KnowledgeGraphCharacter[]
+  events: KnowledgeGraphEvent[]
+}
+
 export const novelAiApi = {
   generateOutline: (data: {
     novel_id: number
@@ -58,4 +77,19 @@ export const novelAiApi = {
     system_prompt?: string
   }) =>
     transport.post<ApiResponse<GenerateNextChapterResult>>(`/novel-ai/generate/next/${novelId}`, data),
+
+  getChaptersWithContent: (novelId: number) =>
+    transport.get<ApiResponse<Array<{ id: number; chapter_number: number; title: string }>>>(`/novel-ai/graph/${novelId}/chapters`),
+
+  clearGraph: (novelId: number) =>
+    transport.post<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/${novelId}/clear`),
+
+  updateGraphFromChapter: (novelId: number, chapterId: number) =>
+    transport.post<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/update-chapter/${novelId}/${chapterId}`),
+
+  getGraph: (novelId: number) =>
+    transport.get<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/${novelId}`),
+
+  rebuildGraph: (novelId: number) =>
+    transport.post<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/rebuild/${novelId}`),
 }

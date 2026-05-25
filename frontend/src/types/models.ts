@@ -96,6 +96,7 @@ export interface Novel {
   genre: string | null
   synopsis: string
   outline: string | null
+  knowledge_graph: string | null
   total_chapters: number | null
   owner_id: number
   ai_config_id: number | null
