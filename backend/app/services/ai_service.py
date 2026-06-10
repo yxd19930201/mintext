@@ -232,7 +232,7 @@ class AIService:
         base_url, api_key, model = self._resolve(ai_config)
         sys_msg = system_prompt or (
             "你是一位专业的网络小说作家，擅长创作情节紧凑、文笔流畅的小说章节。"
-            "严格按照用户指定的字数范围写作，在字数范围内完整交代本章剧情，自然收尾，不要强行拖长。"
+            "严格按照用户指定的字数范围写作，在字数范围内完整交代本章剧情，自然收尾，不要强行拖长，也不要写到一半截断。"
         )
         user_content = ""
         if context:

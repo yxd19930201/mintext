@@ -183,7 +183,7 @@ class NovelGenerateService:
         prompt = f"第 {chapter.chapter_number} 章：{chapter.title}\n"
         if chapter.synopsis:
             prompt += f"本章简介：{chapter.synopsis}\n"
-        prompt += "请在 4000 到 4500 字以内完整交代本章剧情，情节完整自然收尾，不要超过 4500 字。"
+        prompt += "请在 2800 到 3200 字以内完整交代本章剧情，情节完整自然收尾，不要超过 3200 字。"
 
         # Generate content
         content = await ai_service.generate_chapter(

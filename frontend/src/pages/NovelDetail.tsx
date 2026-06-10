@@ -238,7 +238,8 @@ export default function NovelDetail() {
     setGraphLoading(true)
     try {
       const res = await novelAiApi.getGraph(Number(novelId))
-      setGraph(res.data || { characters: [], events: [] })
+      const raw = res.data || {}
+      setGraph({ characters: raw.characters || [], events: raw.events || [] })
       setShowGraph(true)
     } catch (e) {
       alert('加载图谱失败: ' + String(e))
@@ -269,7 +270,7 @@ export default function NovelDetail() {
         try {
           const res = await novelAiApi.updateGraphFromChapter(Number(novelId), ch.id)
           if (res.data) {
-            setGraph(res.data)
+            setGraph({ characters: res.data.characters || [], events: res.data.events || [] })
           }
           setRebuildProgress({ done: i + 1, total: chapters.length })
         } catch (e) {
@@ -465,9 +466,9 @@ export default function NovelDetail() {
                         <span style={{ fontSize: 11, color: '#888', background: '#e8e8e8', borderRadius: 4, padding: '1px 6px' }}>{char.role}</span>
                       </div>
                       {char.description && <div style={{ color: '#555', marginBottom: 4 }}>{char.description}</div>}
-                      {char.relations.length > 0 && (
+                      {(char.relations || []).length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {char.relations.map((r, j) => (
+                          {(char.relations || []).map((r, j) => (
                             <span key={j} style={{ fontSize: 11, color: '#666', background: '#efefef', borderRadius: 4, padding: '2px 6px' }}>
                               {r.target} · {r.relation}
                             </span>
@@ -496,9 +497,9 @@ export default function NovelDetail() {
                         <span style={{ fontWeight: 600 }}>{ev.title}</span>
                       </div>
                       <div style={{ color: '#555' }}>{ev.description}</div>
-                      {ev.related_characters.length > 0 && (
+                      {(ev.related_characters || []).length > 0 && (
                         <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {ev.related_characters.map((c, j) => (
+                          {(ev.related_characters || []).map((c, j) => (
                             <span key={j} style={{ fontSize: 11, color: '#666', background: '#efefef', borderRadius: 4, padding: '1px 6px' }}>{c}</span>
                           ))}
                         </div>
