@@ -7,7 +7,7 @@ class NovelBase(BaseModel):
     title: str = Field(..., max_length=200)
     genre: Optional[str] = Field(None, max_length=50)
     synopsis: str
-    total_chapters: Optional[int] = None
+    total_chapters: Optional[int] = Field(None, ge=1, le=200)
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
 
@@ -22,7 +22,7 @@ class NovelUpdate(BaseModel):
     synopsis: Optional[str] = None
     outline: Optional[str] = None
     knowledge_graph: Optional[str] = None
-    total_chapters: Optional[int] = None
+    total_chapters: Optional[int] = Field(None, ge=1, le=200)
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
 

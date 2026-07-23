@@ -15,6 +15,10 @@ export default function NovelList() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim() || !synopsis.trim()) return
+    if (!Number.isInteger(totalChapters) || totalChapters < 1 || totalChapters > 200) {
+      alert('计划章节数必须是 1–200 之间的整数')
+      return
+    }
     await createNovel({
       title: title.trim(),
       genre: genre.trim() || undefined,
@@ -72,9 +76,9 @@ export default function NovelList() {
                 className="input"
                 type="number"
                 min={1}
-                max={500}
+                max={200}
                 value={totalChapters}
-                onChange={e => setTotalChapters(Number(e.target.value))}
+                onChange={e => setTotalChapters(Math.min(200, Math.max(1, Number(e.target.value) || 1)))}
               />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>

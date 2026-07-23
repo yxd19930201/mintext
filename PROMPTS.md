@@ -1,5 +1,7 @@
 # minitext 提示词汇总
 
+> 小说模块已接入 `novel-continuity-writer`。以下小说提示词在发送前会由 `backend/app/services/novel_skill_service.py` 按 `outline`、`draft`、`next`、`memory` 阶段自动叠加连续性、因果、追读与记忆规则。调用方传入的 system prompt 只追加项目文风要求，不会替换 skill 规则。
+
 所有 AI 提示词按功能模块整理。每条提示词标注来源文件和函数，方便定位修改。
 
 ---

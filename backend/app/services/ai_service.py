@@ -10,6 +10,8 @@ import httpx
 from fastapi import HTTPException, status
 from app.config import settings
 from app.models.ai_config import AIConfig
+from app.services.creative_prompt_service import creative_prompt, normalize_short_script
+from app.services.novel_skill_service import novel_skill_prompt
 
 
 class AIService:
@@ -43,7 +45,17 @@ class AIService:
     def _resolve(self, ai_config: AIConfig | None) -> tuple[str, str, str]:
         """Return (base_url, api_key, model) from config or settings fallback."""
         if ai_config:
+            if not ai_config.base_url or not ai_config.model:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="AI_CONFIG_REQUIRED:AI 模型配置不完整，请进入“设置 → AI 模型配置”补充接口地址和模型名。",
+                )
             return ai_config.base_url, ai_config.api_key, ai_config.model
+        if not settings.AI_API_KEY:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="AI_CONFIG_REQUIRED:此功能需要使用 AI 模型。请先进入“设置 → AI 模型配置”，添加接口地址、API Key 和模型名，并设为默认配置。",
+            )
         return settings.AI_BASE_URL, settings.AI_API_KEY, settings.AI_MODEL
 
     async def generate_outline(
@@ -57,10 +69,7 @@ class AIService:
     ) -> str:
         """Generate outline JSON string."""
         base_url, api_key, model = self._resolve(ai_config)
-        sys_msg = system_prompt or (
-            "你是一位专业的短剧编剧，擅长创作引人入胜的短剧剧本大纲。"
-            "请严格按照用户要求的 JSON 格式输出，不要添加任何额外说明。"
-        )
+        sys_msg = creative_prompt("short_outline", system_prompt)
         user_msg = (
             f"请为以下短剧创作分集大纲，共 {total_episodes} 集。\n"
             f"剧名：{title}\n"
@@ -84,16 +93,14 @@ class AIService:
     ) -> str:
         """Generate script content."""
         base_url, api_key, model = self._resolve(ai_config)
-        sys_msg = system_prompt or (
-            "你是一位专业的短剧编剧，擅长创作对话生动、节奏紧凑的短剧剧本。"
-            "请按照标准剧本格式输出，包含场景描述、人物对话和动作指示。"
-        )
+        sys_msg = creative_prompt("short_script", system_prompt)
         user_content = ""
         if context:
             user_content += f"项目背景：\n{context}\n\n"
         user_content += f"请根据以下要求生成本集剧本：\n{prompt}"
         messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_content}]
-        return await self._call(messages, base_url, api_key, model)
+        raw = await self._call(messages, base_url, api_key, model)
+        return normalize_short_script(raw)
 
     async def improve_script(
         self,
@@ -103,7 +110,7 @@ class AIService:
     ) -> str:
         """Improve existing script content."""
         base_url, api_key, model = self._resolve(ai_config)
-        sys_msg = "你是一位专业的短剧编剧，请根据用户的优化指令改进剧本内容。"
+        sys_msg = creative_prompt("script_improve")
         user_msg = f"原剧本：\n{content}\n\n优化指令：{instruction}\n\n请输出优化后的完整剧本。"
         messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}]
         return await self._call(messages, base_url, api_key, model)
@@ -176,10 +183,7 @@ class AIService:
         On JSON parse failure, automatically falls back to chapter-by-chapter generation."""
         base_url, api_key, model = self._resolve(ai_config)
         end = end_chapter or total_chapters
-        sys_msg = system_prompt or (
-            "你是一位专业的网络小说作家，擅长创作引人入胜的长篇小说大纲。"
-            "请严格按照用户要求的 JSON 格式输出，不要添加任何额外说明。"
-        )
+        sys_msg = novel_skill_prompt("outline", system_prompt)
 
         all_chapters: list[dict] = []
         current_theme = theme
@@ -191,7 +195,12 @@ class AIService:
                 start_chapter, end, current_theme, sys_msg, base_url, api_key, model,
             )
             all_chapters = chapters
-        except HTTPException:
+        except HTTPException as exc:
+            # Only retry malformed model output. Authentication, networking and
+            # configuration errors must reach the UI instead of becoming fake
+            # "生成失败" outline placeholders.
+            if not str(exc.detail).startswith("AI returned invalid JSON"):
+                raise
             # Fallback: generate one chapter at a time
             for ch_num in range(start_chapter, end + 1):
                 for attempt in range(3):
@@ -205,7 +214,9 @@ class AIService:
                             if not current_theme and fetched_theme:
                                 current_theme = fetched_theme
                         break
-                    except HTTPException:
+                    except HTTPException as exc:
+                        if not str(exc.detail).startswith("AI returned invalid JSON"):
+                            raise
                         if attempt == 2:
                             # Give up on this chapter, insert placeholder
                             all_chapters.append({
@@ -230,10 +241,7 @@ class AIService:
     ) -> str:
         """Generate chapter content (approximately 4000 words)."""
         base_url, api_key, model = self._resolve(ai_config)
-        sys_msg = system_prompt or (
-            "你是一位专业的网络小说作家，擅长创作情节紧凑、文笔流畅的小说章节。"
-            "严格按照用户指定的字数范围写作，在字数范围内完整交代本章剧情，自然收尾，不要强行拖长，也不要写到一半截断。"
-        )
+        sys_msg = novel_skill_prompt("draft", system_prompt)
         user_content = ""
         if context:
             user_content += f"小说背景：\n{context}\n\n"
@@ -251,22 +259,28 @@ class AIService:
     ) -> str:
         """Extract characters and events from chapter content, merge into existing graph."""
         base_url, api_key, model = self._resolve(ai_config)
-        sys_msg = (
-            "你是一位专业的小说分析师，擅长从章节内容中提取人物关系。"
-            "请严格按照 JSON 格式输出，不要添加任何额外说明。"
-        )
-        existing_hint = f"\n\n已有图谱（必须完整保留所有已有人物，在此基础上新增本章内容）：\n{existing_graph[:2000]}" if existing_graph else ""
+        sys_msg = novel_skill_prompt("memory")
+        existing_hint = f"\n\n已有连续性记忆（保留所有仍有效事实，在此基础上更新）：\n{existing_graph[:5000]}" if existing_graph else ""
+        if len(chapter_content) <= 6000:
+            chapter_excerpt = chapter_content
+        else:
+            chapter_excerpt = chapter_content[:3000] + "\n\n【中段省略】\n\n" + chapter_content[-3000:]
         user_msg = (
             f"请从以下第 {chapter_number} 章《{chapter_title}》的内容中，提取并更新人物关系。{existing_hint}\n\n"
-            f"章节内容：\n{chapter_content[:1500]}\n\n"
+            f"章节内容：\n{chapter_excerpt}\n\n"
             "提取规则：\n"
             "1. 只记录与主角有直接互动或关系的人物（主角本人必须包含），忽略与主角无关的次要人物。\n"
             "2. 删除只在一章中出现过一次、且对主角影响不重要的人物。\n"
             "3. 已有图谱中多次出现的人物必须保留并更新描述，不得删除。\n"
-            "4. description 字段限制在30字以内，只写核心身份特征，不要罗列每章情节。\n\n"
-            "请以纯 JSON 格式返回完整图谱：\n"
+            "4. description 字段限制在30字以内，只写核心身份特征，不要罗列每章情节。\n"
+            "5. events 记录本章造成的不可逆变化；open_threads 记录仍待兑现的危险、承诺、伏笔或期限。\n"
+            "6. continuity 保存下一章不可违背的时间地点、伤势、资源物件、知识状态和承诺。\n\n"
+            "请以纯 JSON 格式返回完整连续性记忆：\n"
             '{"characters": [{"name": "人物名", "role": "身份/角色", "description": "简要描述(30字内)", '
-            '"relations": [{"target": "关联人物名", "relation": "关系描述"}]}]}'
+            '"relations": [{"target": "关联人物名", "relation": "关系描述"}]}], '
+            '"events": [{"chapter": 1, "title": "事件名", "description": "不可逆变化"}], '
+            '"open_threads": [{"thread": "未决线索", "last_chapter": 1, "status": "open"}], '
+            '"continuity": {"time_place": "当前时空", "injuries": [], "items": [], "knowledge": [], "promises": []}}'
         )
         messages = [{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}]
         raw = await self._call(messages, base_url, api_key, model, json_mode=True)

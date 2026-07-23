@@ -11,6 +11,7 @@ from app.repositories.chapter_repo import ChapterRepository
 from app.repositories.chapter_content_repo import ChapterContentRepository
 from app.repositories.ai_config_repo import AIConfigRepository
 from app.services.ai_service import ai_service
+from app.services.novel_skill_service import novel_skill_prompt
 from app.schemas.novel_generate import (
     GenerateNovelOutlineRequest,
     GenerateChapterRequest,
@@ -159,6 +160,15 @@ class NovelGenerateService:
                     kg_lines.append("【已发生的关键事件】")
                     for e in events[-20:]:  # last 20 events to avoid context overflow
                         kg_lines.append(f"- 第{e.get('chapter','')}章 {e.get('title','')}：{e.get('description','')}")
+                    open_threads = kg.get("open_threads", [])
+                    if open_threads:
+                        kg_lines.append("【仍待兑现的线索与承诺】")
+                        for item in open_threads[-20:]:
+                            kg_lines.append(f"- {item.get('thread', '')}（最后涉及第{item.get('last_chapter', '')}章）")
+                    continuity = kg.get("continuity")
+                    if continuity:
+                        kg_lines.append("【下一章不可违背的连续性状态】")
+                        kg_lines.append(json.dumps(continuity, ensure_ascii=False))
                     context_parts.append("\n".join(kg_lines))
             except Exception:
                 pass
@@ -169,8 +179,9 @@ class NovelGenerateService:
             if prev_chapter:
                 prev_content = await self.content_repo.get_latest(prev_chapter.id)
                 if prev_content and prev_content.content:
-                    # Take last 800 characters for context
-                    snippet = prev_content.content[-800:]
+                    # Keep enough of the previous ending to preserve actions,
+                    # item custody and time transitions rather than only tone.
+                    snippet = prev_content.content[-2000:]
                     context_parts.append(
                         f"上一章（第 {prev_chapter.chapter_number} 章：{prev_chapter.title}）结尾内容：\n{snippet}\n"
                         f"请确保本章内容与上一章自然衔接，情节连贯。"
@@ -247,6 +258,19 @@ class NovelGenerateService:
         if not novel:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Novel not found")
 
+        # Validate configuration before entering the per-chapter error loop so
+        # the UI can show one actionable "configure AI" message.
+        ai_config = None
+        if req.ai_config_id:
+            ai_config = await self.ai_config_repo.get(req.ai_config_id)
+            if not ai_config:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
+        elif novel.ai_config_id:
+            ai_config = await self.ai_config_repo.get(novel.ai_config_id)
+        if not ai_config:
+            ai_config = await self.ai_config_repo.get_default()
+        ai_service._resolve(ai_config)
+
         # Get all chapters, sorted by chapter_number
         chapters = await self.chapter_repo.get_by_novel(novel_id)
         chapters.sort(key=lambda c: c.chapter_number)
@@ -321,14 +345,17 @@ class NovelGenerateService:
         if not ai_config:
             ai_config = await self.ai_config_repo.get_default()
 
-        # Extract last 1000 characters for context
-        snippet = last_content.content[-1000:]
+        # Include both the latest scene and the structured continuity memory.
+        snippet = last_content.content[-2000:]
+        continuity_hint = ""
+        if novel.knowledge_graph:
+            continuity_hint = f"\n\n当前正史连续性记忆：\n{novel.knowledge_graph[:5000]}"
 
         # Generate next chapter outline
-        sys_msg = "你是一位专业的网络小说作家。请根据上一章内容，生成下一章的标题和简介。严格按照 JSON 格式输出。"
+        sys_msg = novel_skill_prompt("next", req.system_prompt or novel.system_prompt)
         user_msg = (
             f"小说：{novel.title}\n"
-            f"故事大概：{novel.synopsis}\n\n"
+            f"故事大概：{novel.synopsis}{continuity_hint}\n\n"
             f"上一章（第 {last_chapter.chapter_number} 章：{last_chapter.title}）结尾内容：\n{snippet}\n\n"
             f"请生成第 {last_chapter.chapter_number + 1} 章的标题和简介，以纯 JSON 格式返回：\n"
             '{"title": "章节标题", "synopsis": "本章简介"}'

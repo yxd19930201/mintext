@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 from app.repositories.ai_config_repo import AIConfigRepository
 from app.services.ai_service import ai_service
+from app.services.creative_prompt_service import creative_prompt, normalize_short_script
 from app.schemas.conversion import (
     NovelToScriptRequest,
     ScriptToVideoRequest,
@@ -26,12 +27,11 @@ class ConversionService:
             ai_config = await self.ai_config_repo.get(req.ai_config_id)
             if not ai_config:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
+        else:
+            ai_config = await self.ai_config_repo.get_default()
 
         # Build system prompt
-        sys_msg = req.system_prompt or (
-            "你是一位专业的短剧编剧，擅长将小说文本改编为紧凑、戏剧化的短剧剧本。"
-            "请严格按照 JSON 格式输出，不要添加任何额外说明。"
-        )
+        sys_msg = creative_prompt("novel_to_short", req.system_prompt)
 
         # Build user prompt
         style_hint = f"风格要求：{req.style}\n" if req.style else ""
@@ -85,7 +85,7 @@ class ConversionService:
             ConversionEpisode(
                 episode_number=ep["episode_number"],
                 title=ep["title"],
-                script=ep["script"],
+                script=normalize_short_script(ep["script"]),
                 duration_estimate=ep.get("duration_estimate", "3-5分钟")
             )
             for ep in data.get("episodes", [])
@@ -104,12 +104,11 @@ class ConversionService:
             ai_config = await self.ai_config_repo.get(req.ai_config_id)
             if not ai_config:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
+        else:
+            ai_config = await self.ai_config_repo.get_default()
 
         # Build system prompt
-        sys_msg = req.system_prompt or (
-            "你是一位专业的视频制作导演，擅长将剧本转换为视频生成模型（Seedance 2.0）所需的场景描述。"
-            "请严格按照 JSON 格式输出，不要添加任何额外说明。"
-        )
+        sys_msg = creative_prompt("storyboard", req.system_prompt)
 
         # Build user prompt
         user_msg = (

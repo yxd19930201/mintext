@@ -10,6 +10,7 @@ from app.repositories.script_repo import ScriptRepository
 from app.repositories.ai_config_repo import AIConfigRepository
 from app.schemas.ai_generate import GenerateOutlineRequest, GenerateScriptRequest, BatchGenerateRequest, GenerateNextEpisodeRequest, OutlineResult
 from app.services.ai_service import ai_service
+from app.services.creative_prompt_service import creative_prompt
 
 
 class AIGenerateService:
@@ -119,6 +120,11 @@ class AIGenerateService:
         if not project or project.owner_id != owner_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
+        # Fail once with the standard configuration prompt instead of returning
+        # one opaque failure for every episode.
+        config_id = req.ai_config_id or project.ai_config_id
+        ai_service._resolve(await self._get_ai_config(config_id))
+
         episodes = await self.episode_repo.list(project_id=req.project_id, limit=1000)
         # 按集号排序，保证衔接上下文按顺序生成
         episodes.sort(key=lambda e: e.episode_number)
@@ -190,7 +196,7 @@ class AIGenerateService:
             f"以 JSON 格式返回：{{\"title\": \"集标题\", \"synopsis\": \"本集简介（100字以内）\"}}"
         )
         title_messages = [
-            {"role": "system", "content": system_prompt or "你是一位专业的短剧编剧，只输出纯JSON，不加任何说明。"},
+            {"role": "system", "content": creative_prompt("short_next", system_prompt)},
             {"role": "user", "content": (context or "") + "\n\n" + title_prompt},
         ]
         base_url, api_key, model = svc._resolve(ai_config)

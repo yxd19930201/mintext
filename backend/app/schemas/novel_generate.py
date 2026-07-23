@@ -5,7 +5,7 @@ from typing import Optional, List
 # Request schemas
 class GenerateNovelOutlineRequest(BaseModel):
     novel_id: int
-    total_chapters: int = Field(..., ge=1, le=500)
+    total_chapters: int = Field(..., ge=1, le=200)
     start_chapter: int = Field(1, ge=1)
     end_chapter: Optional[int] = None  # inclusive; defaults to total_chapters
     theme: Optional[str] = None        # pass back theme from first batch

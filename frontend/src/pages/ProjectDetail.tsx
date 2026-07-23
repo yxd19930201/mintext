@@ -5,31 +5,30 @@ import { projectApi } from '../services/api/projectApi'
 import { aiApi } from '../services/api/aiApi'
 import { scriptApi } from '../services/api/scriptApi'
 import { exportTxt } from '../utils/export'
-import type { Episode, Project, OutlineEpisode, AIConfig, AIPromptPreset } from '../types/models'
+import type { Episode, Project, OutlineEpisode, AIConfig } from '../types/models'
+import { usePersistentState } from '../stores/persistentTaskStore'
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
   const id = Number(projectId)
 
-  const [project, setProject] = useState<Project | null>(null)
-  const [episodes, setEpisodes] = useState<Episode[]>([])
+  const [project, setProject] = usePersistentState<Project | null>(`project:${id}:data`, null)
+  const [episodes, setEpisodes] = usePersistentState<Episode[]>(`project:${id}:episodes`, [])
   const [loading, setLoading] = useState(true)
   const [title, setTitle] = useState('')
   const [showForm, setShowForm] = useState(false)
 
-  const [outline, setOutline] = useState<{ total_episodes: number; theme: string; episodes: OutlineEpisode[] } | null>(null)
-  const [generatingOutline, setGeneratingOutline] = useState(false)
-  const [syncingEpisodes, setSyncingEpisodes] = useState(false)
+  const [outline, setOutline] = usePersistentState<{ total_episodes: number; theme: string; episodes: OutlineEpisode[] } | null>(`project:${id}:outline`, null)
+  const [generatingOutline, setGeneratingOutline] = usePersistentState(`project:${id}:generatingOutline`, false)
+  const [syncingEpisodes, setSyncingEpisodes] = usePersistentState(`project:${id}:syncingEpisodes`, false)
   const [outlineTotalEpisodes, setOutlineTotalEpisodes] = useState(10)
 
-  const [batchGenerating, setBatchGenerating] = useState(false)
-  const [batchResult, setBatchResult] = useState<{ total: number; succeeded: number; failed: number } | null>(null)
+  const [batchGenerating, setBatchGenerating] = usePersistentState(`project:${id}:batchGenerating`, false)
+  const [batchResult, setBatchResult] = usePersistentState<{ total: number; succeeded: number; failed: number } | null>(`project:${id}:batchResult`, null)
 
   const [showAISettings, setShowAISettings] = useState(false)
   const [aiConfigs, setAIConfigs] = useState<AIConfig[]>([])
-  const [presets, setPresets] = useState<AIPromptPreset[]>([])
   const [selectedConfigId, setSelectedConfigId] = useState<number | null>(null)
-  const [systemPrompt, setSystemPrompt] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
 
   useEffect(() => {
@@ -38,7 +37,6 @@ export default function ProjectDetail() {
       setProject(proj)
       setEpisodes(epRes.data)
       setSelectedConfigId(proj.ai_config_id)
-      setSystemPrompt(proj.system_prompt ?? '')
       setOutlineTotalEpisodes(proj.total_episodes ?? 10)
       if (proj.outline) {
         try { setOutline(JSON.parse(proj.outline)) } catch { /* ignore */ }
@@ -46,7 +44,6 @@ export default function ProjectDetail() {
       setLoading(false)
     })
     aiApi.listConfigs().then(r => setAIConfigs(r.data ?? []))
-    aiApi.listPresets().then(r => setPresets(r.data ?? []))
   }, [id])
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -64,7 +61,6 @@ export default function ProjectDetail() {
       const res = await aiApi.generateOutline(id, {
         total_episodes: outlineTotalEpisodes,
         ai_config_id: selectedConfigId ?? undefined,
-        system_prompt: systemPrompt || undefined,
       })
       if (res.data) {
         setOutline(res.data)
@@ -111,7 +107,7 @@ export default function ProjectDetail() {
     }
   }
 
-  const [generatingNext, setGeneratingNext] = useState(false)
+  const [generatingNext, setGeneratingNext] = usePersistentState(`project:${id}:generatingNext`, false)
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<number>>(new Set())
   const [deleting, setDeleting] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -174,7 +170,6 @@ export default function ProjectDetail() {
     try {
       const res = await aiApi.generateNextEpisode(id, {
         ai_config_id: selectedConfigId ?? undefined,
-        system_prompt: systemPrompt || undefined,
       })
       if (res.data) {
         // 刷新分集列表
@@ -194,7 +189,6 @@ export default function ProjectDetail() {
     try {
       const res = await aiApi.batchGenerate(id, {
         ai_config_id: selectedConfigId ?? undefined,
-        system_prompt: systemPrompt || undefined,
         only_missing: onlyMissing,
       })
       if (res.data) setBatchResult(res.data)
@@ -210,7 +204,6 @@ export default function ProjectDetail() {
     try {
       const res = await projectApi.update(id, {
         ai_config_id: selectedConfigId,
-        system_prompt: systemPrompt || null,
       })
       setProject(res.data!)
     } finally {
@@ -460,27 +453,6 @@ export default function ProjectDetail() {
                       <option key={c.id} value={c.id}>{c.name} ({c.model})</option>
                     ))}
                   </select>
-                </div>
-                <div style={{ marginBottom: 12 }}>
-                  <label className="label">系统提示词（覆盖全局）</label>
-                  <select
-                    className="input"
-                    style={{ marginBottom: 8 }}
-                    onChange={e => { if (e.target.value) setSystemPrompt(e.target.value) }}
-                    defaultValue=""
-                  >
-                    <option value="">选择预设…</option>
-                    {presets.map(p => (
-                      <option key={p.id} value={p.content}>{p.name}</option>
-                    ))}
-                  </select>
-                  <textarea
-                    className="textarea"
-                    value={systemPrompt}
-                    onChange={e => setSystemPrompt(e.target.value)}
-                    rows={4}
-                    placeholder="留空则使用默认编剧提示词…"
-                  />
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <button className="btn btn-ghost" onClick={handleSaveAISettings} disabled={savingSettings}>

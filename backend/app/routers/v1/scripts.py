@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.services.script_service import ScriptService
 from app.services.ai_service import ai_service
+from app.repositories.ai_config_repo import AIConfigRepository
 from app.schemas.script import ScriptCreate, ScriptUpdate, ScriptRead
 from app.schemas.common import ApiResponse, PaginatedResponse
 
@@ -44,6 +45,7 @@ async def generate_script(episode_id: int, script_id: int, db: AsyncSession = De
     """Trigger AI generation for a script. Returns generated content (placeholder)."""
     from app.schemas.script import ScriptUpdate
     script = await ScriptService(db).get_script(script_id)
-    content = await ai_service.generate_script(script.ai_prompt or "")
+    ai_config = await AIConfigRepository(db).get_default()
+    content = await ai_service.generate_script(script.ai_prompt or "", ai_config=ai_config)
     await ScriptService(db).update_script(script_id, ScriptUpdate(content=content, status="generated"))
     return ApiResponse(data=content)

@@ -1,7 +1,7 @@
 /**
  * Transport factory.
- * Set VITE_TRANSPORT=ipc in .env to switch to desktop (C/S) mode.
- * Default is "http" (B/S mode).
+ * Electron remains a real C/S client: it talks to the independently running
+ * FastAPI server over HTTP. IPC remains available for future local-only APIs.
  */
 import type { ITransport } from '../transport/ITransport'
 import { HttpTransport } from '../transport/HttpTransport'

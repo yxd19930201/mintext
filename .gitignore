@@ -28,7 +28,9 @@ server*.log
 # Node
 node_modules/
 dist/
+release/
 .vite/
+*.tsbuildinfo
 
 # IDE
 .idea/
@@ -38,6 +40,15 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Desktop/server packaging
+backend/*.spec
+backend/dist/
+backend/build/
+frontend/release*/
+
+# Private license issuer (contains the signing private key)
+license-tools/
 
 # Claude
 .claude/

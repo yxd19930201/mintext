@@ -30,6 +30,24 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Electron uses a dark integrated title strip instead of the native white
+   title/menu bars. The strip is draggable and leaves room for window buttons. */
+.desktop-app body::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 32px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  z-index: 9999;
+}
+
+.desktop-app #root {
+  height: calc(100% - 32px);
+  margin-top: 32px;
+}
+
 a { color: inherit; text-decoration: none; }
 
 /* Scrollbar */
@@ -51,9 +69,13 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: background 0.15s, opacity 0.15s, transform 0.1s;
   white-space: nowrap;
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
+.btn:hover { background: var(--border); }
 .btn:active { transform: scale(0.97); }
-.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .btn-primary:hover { background: var(--accent-hover); }
 .btn-ghost { background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--border); color: var(--text); }

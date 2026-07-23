@@ -45,5 +45,5 @@ class BaseRepository(Generic[ModelT]):
         return obj
 
     async def delete(self, obj: ModelT) -> None:
-        self.db.delete(obj)
+        await self.db.delete(obj)
         await self.db.flush()

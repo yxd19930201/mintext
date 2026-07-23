@@ -9,9 +9,12 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - mintext-data:/data
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./minitext.db
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - DATABASE_URL=sqlite+aiosqlite:////data/minitext.db
+      - APP_ENV=production
+      - DEBUG=false
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   # Uncomment to use PostgreSQL instead of SQLite
   # postgres:
@@ -25,5 +28,5 @@ services:
   #   volumes:
   #     - pgdata:/var/lib/postgresql/data
 
-# volumes:
-#   pgdata:
+volumes:
+  mintext-data:

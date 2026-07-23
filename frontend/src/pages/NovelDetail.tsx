@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useNovelStore } from '../stores/novelStore'
 import { novelAiApi } from '../services/api/novelAiApi'
@@ -7,27 +7,28 @@ import { novelApi } from '../services/api/novelApi'
 import { chapterApi } from '../services/api/chapterApi'
 import { exportTxt } from '../utils/export'
 import type { ChapterOutlineItem } from '../types/models'
+import { usePersistentState } from '../stores/persistentTaskStore'
 
 export default function NovelDetail() {
   const { novelId } = useParams<{ novelId: string }>()
   const { currentNovel, chapters, loading, fetchNovel, fetchChapters, createChapter } = useNovelStore()
-  const [outline, setOutline] = useState<ChapterOutlineItem[]>([])
+  const [outline, setOutline] = usePersistentState<ChapterOutlineItem[]>(`novel:${novelId}:outline`, [])
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editDraft, setEditDraft] = useState<ChapterOutlineItem | null>(null)
   const [savingOutline, setSavingOutline] = useState(false)
   const [syncingIndex, setSyncingIndex] = useState<number | null>(null)
-  const [generating, setGenerating] = useState(false)
+  const [syncingAll, setSyncingAll] = usePersistentState(`novel:${novelId}:syncingAll`, false)
+  const [syncProgress, setSyncProgress] = usePersistentState<{ done: number; total: number } | null>(`novel:${novelId}:syncProgress`, null)
+  const [generating, setGenerating] = usePersistentState(`novel:${novelId}:generating`, false)
   const [totalChapters, setTotalChapters] = useState(50)
-  const [showAiPanel, setShowAiPanel] = useState(false)
-  const [batchGenerating, setBatchGenerating] = useState(false)
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(new Set())
   const [deleting, setDeleting] = useState(false)
 
-  const [graph, setGraph] = useState<KnowledgeGraph | null>(null)
+  const [graph, setGraph] = usePersistentState<KnowledgeGraph | null>(`novel:${novelId}:graph`, null)
   const [showGraph, setShowGraph] = useState(false)
   const [graphLoading, setGraphLoading] = useState(false)
-  const [rebuildingGraph, setRebuildingGraph] = useState(false)
-  const [rebuildProgress, setRebuildProgress] = useState<{ done: number; total: number } | null>(null)
+  const [rebuildingGraph, setRebuildingGraph] = usePersistentState(`novel:${novelId}:rebuildingGraph`, false)
+  const [rebuildProgress, setRebuildProgress] = usePersistentState<{ done: number; total: number } | null>(`novel:${novelId}:rebuildProgress`, null)
 
   useEffect(() => {
     if (novelId) {
@@ -47,10 +48,14 @@ export default function NovelDetail() {
     }
   }, [currentNovel])
 
-  const [generatingProgress, setGeneratingProgress] = useState<{ done: number; total: number } | null>(null)
+  const [generatingProgress, setGeneratingProgress] = usePersistentState<{ done: number; total: number } | null>(`novel:${novelId}:generatingProgress`, null)
 
   const handleGenerateOutline = async () => {
     if (!novelId || !currentNovel) return
+    if (!Number.isInteger(totalChapters) || totalChapters < 1 || totalChapters > 200) {
+      alert('章节数必须是 1–200 之间的整数')
+      return
+    }
     setGenerating(true)
     setOutline([])
     setGeneratingProgress({ done: 0, total: totalChapters })
@@ -78,7 +83,9 @@ export default function NovelDetail() {
         remaining.push({ start, end: Math.min(start + BATCH - 1, totalChapters) })
       }
 
-      const CONCURRENCY = 4
+      // Serialize persistence batches. Concurrent requests used to read the
+      // same old outline and overwrite one another (50 chapters could become 25).
+      const CONCURRENCY = 1
       for (let i = 0; i < remaining.length; i += CONCURRENCY) {
         const group = remaining.slice(i, i + CONCURRENCY)
         const results = await Promise.all(
@@ -101,6 +108,21 @@ export default function NovelDetail() {
         setGeneratingProgress({ done: lastDone, total: totalChapters })
       }
 
+      // The client has the authoritative union of all generated batches. Save
+      // it once more as a complete document so a refresh can never expose a
+      // partially overwritten outline.
+      const completeOutline = Array.from(
+        new Map(accumulated.map(item => [item.chapter_number, item])).values(),
+      ).sort((a, b) => a.chapter_number - b.chapter_number)
+      await novelApi.update(Number(novelId), {
+        outline: JSON.stringify({
+          total_chapters: totalChapters,
+          theme,
+          chapters: completeOutline,
+        }),
+        total_chapters: totalChapters,
+      })
+      setOutline(completeOutline)
       await fetchNovel(Number(novelId))
     } catch (e) {
       alert('生成大纲失败: ' + String(e))
@@ -156,6 +178,8 @@ export default function NovelDetail() {
 
   const handleSyncToChapters = async () => {
     if (!novelId || outline.length === 0) return
+    setSyncingAll(true)
+    setSyncProgress({ done: 0, total: outline.length })
     try {
       // 先拉取最新完整章节列表
       const latestRes = await chapterApi.list(Number(novelId))
@@ -170,7 +194,8 @@ export default function NovelDetail() {
       }
 
       // 按大纲逐章 upsert
-      for (const item of outline) {
+      for (let index = 0; index < outline.length; index++) {
+        const item = outline[index]
         const existing = latestChapters.find(c => c.chapter_number === item.chapter_number)
         if (existing) {
           await chapterApi.update(Number(novelId), existing.id, { title: item.title, synopsis: item.synopsis })
@@ -181,28 +206,16 @@ export default function NovelDetail() {
             synopsis: item.synopsis,
           })
         }
+        setSyncProgress({ done: index + 1, total: outline.length })
       }
 
       await fetchChapters(Number(novelId))
       alert('同步成功！')
     } catch (e) {
       alert('同步失败: ' + String(e))
-    }
-  }
-
-  const handleBatchGenerate = async (onlyMissing: boolean) => {
-    if (!novelId) return
-    setBatchGenerating(true)
-    try {
-      const res = await novelAiApi.batchGenerate(Number(novelId), { only_missing: onlyMissing })
-      if (res.data) {
-        alert(`批量生成完成！成功: ${res.data.succeeded}, 失败: ${res.data.failed}`)
-        await fetchChapters(Number(novelId))
-      }
-    } catch (e) {
-      alert('批量生成失败: ' + String(e))
     } finally {
-      setBatchGenerating(false)
+      setSyncingAll(false)
+      setSyncProgress(null)
     }
   }
 
@@ -238,7 +251,7 @@ export default function NovelDetail() {
     setGraphLoading(true)
     try {
       const res = await novelAiApi.getGraph(Number(novelId))
-      const raw = res.data || {}
+      const raw: KnowledgeGraph = res.data || { characters: [], events: [] }
       setGraph({ characters: raw.characters || [], events: raw.events || [] })
       setShowGraph(true)
     } catch (e) {
@@ -358,9 +371,9 @@ export default function NovelDetail() {
               className="input"
               type="number"
               min={1}
-              max={500}
+              max={200}
               value={totalChapters}
-              onChange={e => setTotalChapters(Number(e.target.value))}
+              onChange={e => setTotalChapters(Math.min(200, Math.max(1, Number(e.target.value) || 1)))}
             />
           </div>
           <button className="btn btn-primary" onClick={handleGenerateOutline} disabled={generating}>
@@ -371,8 +384,10 @@ export default function NovelDetail() {
               : 'AI 生成大纲'}
           </button>
           {outline.length > 0 && (
-            <button className="btn" onClick={handleSyncToChapters}>
-              同步到章节 ({outline.length} 章)
+            <button className="btn" onClick={handleSyncToChapters} disabled={syncingAll}>
+              {syncingAll && syncProgress
+                ? `同步中 ${syncProgress.done}/${syncProgress.total}...`
+                : `同步全部章节 (${outline.length} 章)`}
             </button>
           )}
         </div>
@@ -535,28 +550,11 @@ export default function NovelDetail() {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-sm" onClick={() => setShowAiPanel(!showAiPanel)}>
-              AI 设置
-            </button>
             <button className="btn btn-sm btn-primary" onClick={handleGenerateNext} disabled={generating || chapters.length === 0}>
               {generating ? '生成中...' : '继续生成下一章'}
             </button>
           </div>
         </div>
-
-        {showAiPanel && (
-          <div style={{ background: '#f8f8f8', padding: 16, borderRadius: 6, marginBottom: 16 }}>
-            <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 13 }}>批量生成</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-sm" onClick={() => handleBatchGenerate(false)} disabled={batchGenerating}>
-                {batchGenerating ? '生成中...' : '一键生成所有章节'}
-              </button>
-              <button className="btn btn-sm" onClick={() => handleBatchGenerate(true)} disabled={batchGenerating}>
-                {batchGenerating ? '生成中...' : '继续生成剩余'}
-              </button>
-            </div>
-          </div>
-        )}
 
         {chapters.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>

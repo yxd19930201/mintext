@@ -1,12 +1,18 @@
 {
   "name": "minitext-frontend",
+  "description": "Mintext 一体化 AI 小说与短剧创作工具",
+  "author": "Mintext",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "desktop/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "desktop:dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
+    "desktop:pack": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
     "axios": "^1.7.7",
@@ -19,7 +25,40 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.2",
+    "concurrently": "^9.1.2",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.12",
     "typescript": "^5.6.3",
-    "vite": "^5.4.9"
+    "vite": "^5.4.9",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.minitext.desktop",
+    "productName": "Mintext",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "desktop/**/*", "package.json"],
+    "extraResources": [
+      {
+        "from": "../backend/dist/mintext-server.exe",
+        "to": "server/mintext-server.exe"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

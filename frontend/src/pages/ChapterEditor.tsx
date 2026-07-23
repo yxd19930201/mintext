@@ -4,17 +4,18 @@ import { transport } from '../services/api'
 import { novelAiApi } from '../services/api/novelAiApi'
 import { exportTxt } from '../utils/export'
 import type { Chapter } from '../types/models'
+import { usePersistentState } from '../stores/persistentTaskStore'
 
 export default function ChapterEditor() {
   const { novelId, chapterId } = useParams<{ novelId: string; chapterId: string }>()
   const [chapter, setChapter] = useState<Chapter | null>(null)
-  const [content, setContent] = useState('')
-  const [wordCount, setWordCount] = useState(0)
-  const [status, setStatus] = useState('draft')
+  const [content, setContent] = usePersistentState(`chapter:${chapterId}:content`, '')
+  const [wordCount, setWordCount] = usePersistentState(`chapter:${chapterId}:wordCount`, 0)
+  const [status, setStatus] = usePersistentState(`chapter:${chapterId}:status`, 'draft')
   const [loading, setLoading] = useState(true)
-  const [noContent, setNoContent] = useState(false)
+  const [noContent, setNoContent] = usePersistentState(`chapter:${chapterId}:noContent`, false)
   const [saving, setSaving] = useState(false)
-  const [generating, setGenerating] = useState(false)
+  const [generating, setGenerating] = usePersistentState(`chapter:${chapterId}:generating`, false)
 
   useEffect(() => {
     if (chapterId) {

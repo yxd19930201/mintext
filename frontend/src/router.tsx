@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom'
+import { createHashRouter } from 'react-router-dom'
 import Layout from './components/Layout'
 import ProjectList from './pages/ProjectList'
 import ProjectDetail from './pages/ProjectDetail'
@@ -18,7 +18,8 @@ function Placeholder({ title }: { title: string }) {
   )
 }
 
-export const router = createBrowserRouter([
+// Hash routing works both on the Vite dev server and from Electron's file:// URL.
+export const router = createHashRouter([
   {
     path: '/',
     element: <Layout />,

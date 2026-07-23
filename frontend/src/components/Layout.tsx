@@ -1,4 +1,6 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { useState } from 'react'
+import feedbackWechat from '../assets/feedback-wechat.jpg'
 
 const NAV = [
   {
@@ -32,6 +34,7 @@ const NAV = [
 
 export default function Layout() {
   const location = useLocation()
+  const [showFeedback, setShowFeedback] = useState(false)
 
   // Derive breadcrumb label from path
   const crumbs: string[] = []
@@ -63,10 +66,7 @@ export default function Layout() {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 15, fontWeight: 800, color: '#fff', letterSpacing: '-0.05em',
             }}>M</div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>minitext</div>
-              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1 }}>短剧剧本生成</div>
-            </div>
+            <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: '-0.02em' }}>minitext</div>
           </div>
         </div>
 
@@ -171,6 +171,17 @@ export default function Layout() {
               <span style={{ color: i === crumbs.length - 1 ? 'var(--text)' : 'var(--text-3)', fontSize: 13 }}>{c}</span>
             </span>
           ))}
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setShowFeedback(true)}
+            style={{ marginLeft: 'auto', padding: '6px 12px' }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
+              <path d="M8 9h8M8 13h5"/>
+            </svg>
+            联系作者 / 问题反馈
+          </button>
         </header>
 
         {/* Page content */}
@@ -178,6 +189,43 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {showFeedback && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowFeedback(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            background: 'rgba(3, 5, 12, 0.78)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <div
+            className="card"
+            onClick={event => event.stopPropagation()}
+            style={{ width: 420, maxWidth: '92vw', padding: 20, boxShadow: '0 24px 80px rgba(0,0,0,.5)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>联系作者 / 问题反馈</div>
+                <div style={{ color: 'var(--text-2)', fontSize: 12, marginTop: 4 }}>微信扫码添加好友，请备注“Mintext反馈”</div>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowFeedback(false)} aria-label="关闭">关闭</button>
+            </div>
+            <img
+              src={feedbackWechat}
+              alt="作者微信二维码"
+              style={{ display: 'block', width: '100%', maxHeight: '68vh', objectFit: 'contain', borderRadius: 8, background: '#fff' }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
