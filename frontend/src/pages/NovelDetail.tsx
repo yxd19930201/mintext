@@ -577,10 +577,10 @@ export default function NovelDetail() {
                   to={`/novels/${novelId}/chapters/${chapter.id}`}
                   style={{ textDecoration: 'none', color: 'inherit', flex: 1 }}
                 >
-                  <div className="card" style={{ padding: 12, background: '#fafafa' }}>
+                  <div className="card" style={{ padding: 12, background: '#fafafa', color: '#1f2937', borderColor: '#d1d5db' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>第 {chapter.chapter_number} 章：{chapter.title}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>第 {chapter.chapter_number} 章：{chapter.title}</div>
                         {chapter.synopsis && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{chapter.synopsis}</div>}
                       </div>
                     </div>

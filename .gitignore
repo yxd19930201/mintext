@@ -7,6 +7,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+!frontend/build/
+!frontend/build/**
 .venv/
 venv/
 env/
