@@ -22,6 +22,10 @@ class NovelUpdate(BaseModel):
     synopsis: Optional[str] = None
     outline: Optional[str] = None
     knowledge_graph: Optional[str] = None
+    story_roadmap: Optional[str] = None
+    state_ledger: Optional[str] = None
+    canon_facts: Optional[str] = None
+    continuity_audits: Optional[str] = None
     total_chapters: Optional[int] = Field(None, ge=1, le=200)
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
@@ -31,6 +35,10 @@ class NovelRead(NovelBase):
     id: int
     outline: Optional[str] = None
     knowledge_graph: Optional[str] = None
+    story_roadmap: Optional[str] = None
+    state_ledger: Optional[str] = None
+    canon_facts: Optional[str] = None
+    continuity_audits: Optional[str] = None
     owner_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None

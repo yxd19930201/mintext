@@ -129,7 +129,7 @@ export default function ChapterEditor() {
               导出
             </button>
             <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
-              {generating ? '生成中...' : 'AI 生成内容'}
+              {generating ? '生成、审核与返修中...' : 'AI 生成内容'}
             </button>
             <button className="btn" onClick={handleSave} disabled={saving}>
               {saving ? '保存中...' : '保存'}
@@ -153,7 +153,7 @@ export default function ChapterEditor() {
       </div>
 
       <div style={{ fontSize: 12, color: '#999', textAlign: 'center' }}>
-        提示：AI 生成的内容会自动与上一章衔接，确保情节连贯
+        提示：正文通过路线图、状态账本和不可逆事实审核后才会保存；发现冲突会自动返修
       </div>
     </div>
   )

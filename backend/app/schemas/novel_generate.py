@@ -35,6 +35,11 @@ class ChapterOutlineItem(BaseModel):
     chapter_number: int
     title: str
     synopsis: str
+    stage_id: Optional[str] = None
+    before_state: dict = Field(default_factory=dict)
+    after_state: dict = Field(default_factory=dict)
+    irreversible_facts: List[str] = Field(default_factory=list)
+    transition: Optional[str] = None
 
 
 class OutlineResult(BaseModel):

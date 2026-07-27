@@ -121,19 +121,243 @@ class AIService:
         if cleaned.startswith("```"):
             cleaned = re.sub(r'^```[a-zA-Z]*\n?', '', cleaned)
             cleaned = re.sub(r'\n?```$', '', cleaned).strip()
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-            if match:
+
+        candidates = [cleaned]
+        first_brace = cleaned.find("{")
+        last_brace = cleaned.rfind("}")
+        if first_brace >= 0 and last_brace > first_brace:
+            candidates.append(cleaned[first_brace:last_brace + 1])
+
+        for candidate in candidates:
+            # Models occasionally leave trailing commas even in JSON mode.
+            variants = [
+                candidate,
+                re.sub(r",\s*([}\]])", r"\1", candidate),
+            ]
+            for variant in variants:
                 try:
-                    return json.loads(match.group(0))
+                    parsed = json.loads(variant)
+                    if isinstance(parsed, dict):
+                        return parsed
                 except json.JSONDecodeError:
-                    pass
+                    continue
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"AI returned invalid JSON for {context}. Raw response: {raw[:300]}"
         )
+
+    async def generate_story_roadmap(
+        self,
+        title: str,
+        genre: str | None,
+        synopsis: str,
+        total_chapters: int,
+        ai_config: AIConfig | None = None,
+    ) -> dict:
+        """Create the fixed whole-book stage contract used by every later call."""
+        base_url, api_key, model = self._resolve(ai_config)
+        system = novel_skill_prompt("roadmap")
+        user = (
+            f"小说名：{title}\n类型：{genre or '不限'}\n总章节数：{total_chapters}\n"
+            f"故事梗概：{synopsis}\n\n"
+            "请输出纯 JSON：\n"
+            '{"total_chapters": 50, "protagonist": {"name": "主角名", "identity": "初始身份", '
+            '"initial_state": {"wealth": "初始财富", "assets": [], "career": "初始职业", '
+            '"abilities": [], "relationships": []}}, "stages": ['
+            '{"id": "S1", "name": "阶段名", "start_chapter": 1, "end_chapter": 10, '
+            '"goal": "阶段目标", "entry_condition": "进入条件", "exit_condition": "完成标志", '
+            '"required_plot_points": ["必须发生的情节"], "state_gain": "不可逆获得或失去", '
+            '"transition_to_next": "自然进入下一阶段的因果事件"}]}'
+        )
+        last_error = "roadmap missing"
+        for _ in range(3):
+            raw = await self._call(
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                base_url, api_key, model, json_mode=True,
+            )
+            roadmap = self._parse_json_response(raw, "story roadmap")
+            stages = sorted(
+                roadmap.get("stages") or [],
+                key=lambda item: item.get("start_chapter", 0),
+            )
+            expected_start = 1
+            valid = bool(stages)
+            for stage in stages:
+                start = stage.get("start_chapter")
+                end = stage.get("end_chapter")
+                if (
+                    start != expected_start
+                    or not isinstance(end, int)
+                    or end < start
+                    or not stage.get("entry_condition")
+                    or not stage.get("exit_condition")
+                ):
+                    valid = False
+                    break
+                expected_start = end + 1
+            if valid and expected_start == total_chapters + 1:
+                roadmap["total_chapters"] = total_chapters
+                roadmap["stages"] = stages
+                return roadmap
+            last_error = (
+                "stage ranges must be continuous from chapter 1 through "
+                f"chapter {total_chapters}, with entry and exit conditions"
+            )
+            user += f"\n\n上一次路线图无效：{last_error}。请完整重做。"
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI failed to create a valid story roadmap: {last_error}",
+        )
+
+    async def audit_outline_candidate(
+        self,
+        synopsis: str,
+        roadmap: dict,
+        state_ledger: dict,
+        canon_facts: list,
+        previous_chapters: list[dict],
+        candidate_chapters: list[dict],
+        ai_config: AIConfig | None = None,
+    ) -> dict:
+        """Audit an outline batch and return approved or a complete replacement."""
+        base_url, api_key, model = self._resolve(ai_config)
+        system = novel_skill_prompt("audit_outline")
+        payload = {
+            "synopsis": synopsis,
+            "roadmap": roadmap,
+            "state_ledger": state_ledger,
+            "canon_facts": canon_facts,
+            "previous_chapters": previous_chapters[-10:],
+            "candidate_chapters": candidate_chapters,
+        }
+        user = (
+            f"审核材料：\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "输出纯 JSON："
+            '{"approved": true, "issues": [], "revised_chapters": ['
+            '{"chapter_number": 1, "title": "标题", "synopsis": "完整简介", '
+            '"stage_id": "S1", "before_state": {}, "after_state": {}, '
+            '"irreversible_facts": [], "transition": "与前后阶段的因果承接"}]}。'
+            "若不通过，revised_chapters 必须包含本批全部章节的完整替换稿；"
+            "若通过，也原样返回完整 candidate_chapters。"
+        )
+        last_error: HTTPException | None = None
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        for attempt in range(1, 3):
+            raw = await self._call(messages, base_url, api_key, model, json_mode=True)
+            try:
+                return self._parse_json_response(raw, "outline continuity audit")
+            except HTTPException as exc:
+                last_error = exc
+                messages = [
+                    {"role": "system", "content": system},
+                    {
+                        "role": "user",
+                        "content": (
+                            user
+                            + "\n\nThe previous response was not valid JSON. "
+                            "Return exactly one JSON object without markdown, comments, or trailing commas."
+                        ),
+                    },
+                ]
+        raise last_error or HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI returned an invalid outline audit response.",
+        )
+
+    async def audit_chapter_candidate(
+        self,
+        chapter_number: int,
+        chapter_outline: dict,
+        content: str,
+        roadmap: dict,
+        state_ledger: dict,
+        canon_facts: list,
+        previous_ending: str,
+        ai_config: AIConfig | None = None,
+    ) -> dict:
+        """Return a strict pass/fail review. A failed draft is never persisted."""
+        base_url, api_key, model = self._resolve(ai_config)
+        system = novel_skill_prompt("audit_draft")
+        payload = {
+            "chapter_number": chapter_number,
+            "chapter_outline": chapter_outline,
+            "roadmap": roadmap,
+            "state_ledger": state_ledger,
+            "canon_facts": canon_facts[-100:],
+            "previous_ending": previous_ending,
+            "candidate_content": content,
+        }
+        user = (
+            f"审核材料：\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            '只输出 JSON：{"approved": true, "issues": [], '
+            '"summary": "审核结论与本章状态变化摘要"}。'
+            "issues 每项必须包含 type、evidence、conflict_with、repair_instruction。"
+        )
+        raw = await self._call(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            base_url, api_key, model, json_mode=True,
+        )
+        return self._parse_json_response(raw, "chapter continuity audit")
+
+    async def revise_chapter_candidate(
+        self,
+        original_content: str,
+        issues: list,
+        context: str,
+        prompt: str,
+        ai_config: AIConfig | None = None,
+    ) -> str:
+        """Repair only the rejected draft; the result must be audited again."""
+        base_url, api_key, model = self._resolve(ai_config)
+        system = novel_skill_prompt("draft")
+        user = (
+            f"正史背景与硬约束：\n{context}\n\n"
+            f"本章任务：\n{prompt}\n\n"
+            f"未通过审核的问题：\n{json.dumps(issues, ensure_ascii=False)}\n\n"
+            f"待返修正文：\n{original_content}\n\n"
+            "请按每条 repair_instruction 完整重写本章。不得用一句解释掩盖冲突；"
+            "必须在情节中建立充分因果。只输出修订后的小说正文。"
+        )
+        return await self._call(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            base_url, api_key, model,
+        )
+
+    async def extract_canon_update(
+        self,
+        chapter_number: int,
+        chapter_title: str,
+        content: str,
+        existing_ledger: dict,
+        existing_facts: list,
+        ai_config: AIConfig | None = None,
+    ) -> dict:
+        """Build the full post-chapter ledger only after the draft passed review."""
+        base_url, api_key, model = self._resolve(ai_config)
+        system = novel_skill_prompt("canon")
+        payload = {
+            "chapter_number": chapter_number,
+            "chapter_title": chapter_title,
+            "existing_state_ledger": existing_ledger,
+            "existing_irreversible_facts": existing_facts[-100:],
+            "approved_content": content,
+        }
+        user = (
+            f"正史更新材料：\n{json.dumps(payload, ensure_ascii=False)}\n\n"
+            "输出纯 JSON："
+            '{"state_ledger": {"current_chapter": 1, "time_place": "", '
+            '"protagonist": {"name": "", "identity": "", "career": "", "wealth": "", '
+            '"cash": "", "assets": [], "debts": [], "abilities": [], "reputation": "", '
+            '"injuries": [], "relationships": [], "knowledge": [], "items": [], '
+            '"promises": [], "open_conflicts": []}, "supporting_characters": []}, '
+            '"new_irreversible_facts": [{"chapter": 1, "type": "wealth|identity|asset|ability|'
+            'relationship|time|event", "fact": "不可逆事实", "cause": "正文依据"}]}'
+        )
+        raw = await self._call(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            base_url, api_key, model, json_mode=True,
+        )
+        return self._parse_json_response(raw, "canon ledger update")
 
     async def _generate_chapters_range(
         self,
@@ -148,15 +372,55 @@ class AIService:
         base_url: str,
         api_key: str,
         model: str,
+        previous_chapters: list[dict] | None = None,
     ) -> tuple[list[dict], str]:
         """Generate chapters [start, end] as a single AI call. Returns list of chapter dicts."""
         theme_hint = f"\n核心主题（请保持一致）：{theme}" if theme else ""
+        previous_chapters = previous_chapters or []
+        start_progress = round((start - 1) / total_chapters * 100)
+        end_progress = round(end / total_chapters * 100)
+        remaining_chapters = max(total_chapters - end, 0)
+        progress_hint = (
+            "\n\n【全书进度坐标与剧情推进（与连续性同等重要）】\n"
+            f"本批次位于全书约 {start_progress}%～{end_progress}% 的位置，"
+            f"生成后还剩 {remaining_chapters} 章。\n"
+            "必须先根据“故事梗概”识别其中按时间或因果排列的全部重要阶段、行业、目标和重大事件，"
+            "再按总章数把它们合理分配到开篇、发展、中段、后段和结局。\n"
+            "开篇1～5章只用于锁定主角身份、人物关系和世界观，不代表后续必须停留在开篇的剧情阶段；"
+            "最近章节只用于保证因果承接，也不允许反复复制同一阶段、同一目标或同类事件。\n"
+            "若梗概包含多个连续阶段（例如股票、楼市、互联网），必须让前一阶段产生明确成果或转折，"
+            "并在合理章数内进入下一阶段，确保结局前覆盖全部阶段；不得因为强调连续性而长期原地打转。\n"
+            "本批次既要承接上一章，又必须产生不可逆的新进展，并为梗概中的下一项尚未完成的重要阶段铺垫。\n"
+        )
+        anchor_chapters = previous_chapters[:5]
+        recent_chapters = previous_chapters[-10:]
+        continuity_chapters = {
+            chapter["chapter_number"]: chapter
+            for chapter in [*anchor_chapters, *recent_chapters]
+            if chapter.get("chapter_number", 0) < start
+        }
+        continuity_hint = ""
+        if continuity_chapters:
+            continuity_json = json.dumps(
+                list(continuity_chapters.values()),
+                ensure_ascii=False,
+            )
+            continuity_hint = (
+                "\n\n【已确定的正史大纲（不可改写）】\n"
+                f"{continuity_json}\n"
+                "必须延续上述主角、身份、核心目标、人物关系、时间线、资源状态、未解决冲突和上一章钩子。"
+                "不得在本批次重新定义主角，不得另起一个无关故事，不得把新人物写成新的主角。"
+                f"第 {start} 章必须直接承接第 {start - 1} 章的结果或钩子。"
+            )
         count = end - start + 1
         user_msg = (
             f"请为以下小说创作第 {start}~{end} 章的章节大纲（共 {total_chapters} 章，本次只生成这 {count} 章）。\n"
             f"小说名：{title}\n"
             f"类型：{genre or '不限'}\n"
-            f"故事大概：{synopsis}{theme_hint}\n\n"
+            f"故事大概：{synopsis}{theme_hint}{progress_hint}{continuity_hint}\n\n"
+            "连续性硬性要求：全书默认只有同一位核心主角；除非原始故事大概明确指定群像或双主角，"
+            "否则不得更换主角。新人物只能作为配角、对手或阶段人物，并必须由既有因果引入。"
+            "每章的开端必须承接前章的结果，每章的变化必须进入下一章，禁止批次边界剧情重置。\n\n"
             f"严格只输出第 {start} 到第 {end} 章，纯 JSON，不要任何其他文字：\n"
             '{"total_chapters": ' + str(total_chapters) + ', "theme": "核心主题", "chapters": ['
             '{"chapter_number": ' + str(start) + ', "title": "章节标题", "synopsis": "本章简介"}'
@@ -178,6 +442,7 @@ class AIService:
         theme: str = "",
         system_prompt: str | None = None,
         ai_config: AIConfig | None = None,
+        previous_chapters: list[dict] | None = None,
     ) -> str:
         """Generate novel chapter outline for [start_chapter, end_chapter].
         On JSON parse failure, automatically falls back to chapter-by-chapter generation."""
@@ -193,6 +458,7 @@ class AIService:
             chapters, current_theme = await self._generate_chapters_range(
                 title, genre, synopsis, total_chapters,
                 start_chapter, end, current_theme, sys_msg, base_url, api_key, model,
+                previous_chapters,
             )
             all_chapters = chapters
         except HTTPException as exc:
@@ -202,15 +468,18 @@ class AIService:
             if not str(exc.detail).startswith("AI returned invalid JSON"):
                 raise
             # Fallback: generate one chapter at a time
+            continuity_chapters = list(previous_chapters or [])
             for ch_num in range(start_chapter, end + 1):
                 for attempt in range(3):
                     try:
                         chapters, fetched_theme = await self._generate_chapters_range(
                             title, genre, synopsis, total_chapters,
                             ch_num, ch_num, current_theme, sys_msg, base_url, api_key, model,
+                            continuity_chapters,
                         )
                         if chapters:
                             all_chapters.extend(chapters)
+                            continuity_chapters.extend(chapters)
                             if not current_theme and fetched_theme:
                                 current_theme = fetched_theme
                         break

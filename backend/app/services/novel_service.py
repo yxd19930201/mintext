@@ -36,6 +36,19 @@ class NovelService:
     async def update_novel(self, novel_id: int, data: NovelUpdate, owner_id: int) -> Novel:
         novel = await self.get_novel(novel_id, owner_id)
         update_data = data.model_dump(exclude_unset=True)
+        synopsis_changed = (
+            "synopsis" in update_data
+            and update_data["synopsis"] != novel.synopsis
+        )
+        chapter_count_changed = (
+            "total_chapters" in update_data
+            and update_data["total_chapters"] != novel.total_chapters
+        )
+        if synopsis_changed or chapter_count_changed:
+            # A roadmap is a fixed contract derived from synopsis + book size.
+            # Invalidate only that derived contract; canonical content, state
+            # ledger and irreversible facts remain untouched.
+            update_data["story_roadmap"] = None
         novel = await self.repo.update(novel, **update_data)
         await self.db.commit()
         return novel

@@ -5,7 +5,10 @@ export class HttpTransport implements ITransport {
   private client: AxiosInstance
 
   constructor(baseURL = getApiBaseUrl()) {
-    this.client = axios.create({ baseURL, timeout: 600000 })
+    // A full Skill generation can include draft, strict review, up to three
+    // automatic repairs and canon-ledger extraction. Let the local desktop
+    // server own cancellation instead of aborting a valid long-running batch.
+    this.client = axios.create({ baseURL, timeout: 0 })
 
     this.client.interceptors.request.use((config) => {
       const token = localStorage.getItem('access_token')
@@ -21,6 +24,15 @@ export class HttpTransport implements ITransport {
           const message = detail.slice('AI_CONFIG_REQUIRED:'.length)
           error.message = message
           error.response.data.detail = message
+        }
+        if (detail && typeof detail === 'object' && detail.message) {
+          const issues = Array.isArray(detail.issues)
+            ? detail.issues
+                .slice(0, 5)
+                .map((item: any) => item.repair_instruction || item.evidence || item.type || String(item))
+                .join('；')
+            : ''
+          error.message = issues ? `${detail.message}：${issues}` : detail.message
         }
         return Promise.reject(error)
       },

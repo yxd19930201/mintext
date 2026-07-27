@@ -13,6 +13,10 @@ class Novel(Base):
     synopsis = Column(Text, nullable=False)
     outline = Column(Text, nullable=True)  # JSON format
     knowledge_graph = Column(Text, nullable=True)  # JSON: {characters:[...], events:[...]}
+    story_roadmap = Column(Text, nullable=True)  # JSON: fixed whole-book stage allocation
+    state_ledger = Column(Text, nullable=True)  # JSON: canonical identity/assets/relationships/status
+    canon_facts = Column(Text, nullable=True)  # JSON: irreversible facts approved by review
+    continuity_audits = Column(Text, nullable=True)  # JSON: append-only outline/draft review summaries
     total_chapters = Column(Integer, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     ai_config_id = Column(Integer, ForeignKey("ai_configs.id", ondelete="SET NULL"), nullable=True)

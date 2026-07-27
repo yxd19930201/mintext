@@ -108,24 +108,24 @@ export default function NovelDetail() {
         setGeneratingProgress({ done: lastDone, total: totalChapters })
       }
 
-      // The client has the authoritative union of all generated batches. Save
-      // it once more as a complete document so a refresh can never expose a
-      // partially overwritten outline.
+      // The backend is authoritative: every serialized batch has already been
+      // reviewed and transactionally merged with its Skill metadata. Do not
+      // overwrite it here with a reduced client-side shape.
       const completeOutline = Array.from(
         new Map(accumulated.map(item => [item.chapter_number, item])).values(),
       ).sort((a, b) => a.chapter_number - b.chapter_number)
-      await novelApi.update(Number(novelId), {
-        outline: JSON.stringify({
-          total_chapters: totalChapters,
-          theme,
-          chapters: completeOutline,
-        }),
-        total_chapters: totalChapters,
-      })
       setOutline(completeOutline)
       await fetchNovel(Number(novelId))
-    } catch (e) {
-      alert('生成大纲失败: ' + String(e))
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail
+      const message = typeof detail === 'string'
+        ? detail
+        : detail?.message
+          ? `${detail.message}${Array.isArray(detail.issues) && detail.issues.length
+              ? `\n${detail.issues.map((item: any) => item.repair_instruction || item.evidence || String(item)).join('\n')}`
+              : ''}`
+          : e?.message || '未知错误'
+      alert('生成大纲失败：' + message)
     } finally {
       setGenerating(false)
       setGeneratingProgress(null)
@@ -379,8 +379,8 @@ export default function NovelDetail() {
           <button className="btn btn-primary" onClick={handleGenerateOutline} disabled={generating}>
             {generating
               ? generatingProgress
-                ? `生成中 ${generatingProgress.done}/${generatingProgress.total}...`
-                : '生成中...'
+                ? `生成、审核与返修中 ${generatingProgress.done}/${generatingProgress.total}...`
+                : '生成、审核与返修中...'
               : 'AI 生成大纲'}
           </button>
           {outline.length > 0 && (

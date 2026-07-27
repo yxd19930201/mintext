@@ -97,6 +97,10 @@ export interface Novel {
   synopsis: string
   outline: string | null
   knowledge_graph: string | null
+  story_roadmap: string | null
+  state_ledger: string | null
+  canon_facts: string | null
+  continuity_audits: string | null
   total_chapters: number | null
   owner_id: number
   ai_config_id: number | null
@@ -130,6 +134,11 @@ export interface ChapterOutlineItem {
   chapter_number: number
   title: string
   synopsis: string
+  stage_id?: string | null
+  before_state?: Record<string, unknown>
+  after_state?: Record<string, unknown>
+  irreversible_facts?: string[]
+  transition?: string | null
 }
 
 export interface NovelOutlineResult {
