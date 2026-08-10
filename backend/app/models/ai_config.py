@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import String, Text, Boolean
+from sqlalchemy import String, Text, Boolean, Float
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TimestampMixin
 
@@ -13,3 +13,5 @@ class AIConfig(Base, TimestampMixin):
     api_key: Mapped[str] = mapped_column(String(512), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    input_price_cny: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    output_price_cny: Mapped[float] = mapped_column(Float, default=0, nullable=False)

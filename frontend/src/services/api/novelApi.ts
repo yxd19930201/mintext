@@ -26,6 +26,11 @@ export const novelApi = {
     total_chapters: number
     ai_config_id: number | null
     system_prompt: string | null
+    knowledge_graph: string
+    story_roadmap: string
+    state_ledger: string
+    canon_facts: string
+    continuity_audits: string
   }>) =>
     transport.patch<ApiResponse<Novel>>(`/novels/${id}`, data),
 

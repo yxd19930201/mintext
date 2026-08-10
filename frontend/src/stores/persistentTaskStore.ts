@@ -16,6 +16,10 @@ const usePersistentTaskStore = create<PersistentTaskState>((set) => ({
   })),
 }))
 
+export function usePersistentTaskValues() {
+  return usePersistentTaskStore(state => state.values)
+}
+
 /**
  * Keeps in-flight task state in a global in-memory store so navigating between
  * routes does not reset buttons, progress, inputs, or generated results.

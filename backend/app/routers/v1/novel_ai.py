@@ -1,4 +1,7 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -18,6 +21,10 @@ from app.schemas.novel_generate import (
 from app.schemas.common import ApiResponse
 
 router = APIRouter()
+
+
+class ArchiveSectionUpdate(BaseModel):
+    data: Any
 
 
 @router.post("/generate/outline", response_model=ApiResponse[OutlineResult])
@@ -101,6 +108,30 @@ async def get_knowledge_graph(
     user_id: int = Depends(get_current_user_id),
 ):
     result = await KnowledgeGraphService(db).get_graph(novel_id, user_id)
+    return ApiResponse(data=result)
+
+
+@router.get("/archive/{novel_id}", response_model=ApiResponse[dict])
+async def get_canon_archive(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    result = await KnowledgeGraphService(db).get_archive(novel_id, user_id)
+    return ApiResponse(data=result)
+
+
+@router.patch("/archive/{novel_id}/{section}", response_model=ApiResponse[dict])
+async def update_canon_archive_section(
+    novel_id: int,
+    section: str,
+    req: ArchiveSectionUpdate,
+    db: AsyncSession = Depends(get_db),
+    user_id: int = Depends(get_current_user_id),
+):
+    result = await KnowledgeGraphService(db).update_archive_section(
+        novel_id, section, req.data, user_id,
+    )
     return ApiResponse(data=result)
 
 

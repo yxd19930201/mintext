@@ -15,6 +15,25 @@ export const aiApi = {
   deleteConfig: (id: number) =>
     transport.delete<void>(`/ai/configs/${id}`),
 
+  getUsage: () =>
+    transport.get<ApiResponse<{
+      prompt_tokens: number
+      completion_tokens: number
+      total_tokens: number
+      estimated_cost_cny: number
+      calls: number
+      by_model: Record<string, {
+        prompt_tokens: number
+        completion_tokens: number
+        total_tokens: number
+        estimated_cost_cny: number
+        calls: number
+      }>
+    }>>('/ai/usage'),
+
+  resetUsage: () =>
+    transport.delete<ApiResponse<Record<string, unknown>>>('/ai/usage'),
+
   // Prompt presets
   listPresets: () =>
     transport.get<ApiResponse<AIPromptPreset[]>>('/ai/prompts'),

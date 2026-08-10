@@ -10,8 +10,19 @@ from app.schemas.ai_config import AIConfigCreate, AIConfigUpdate, AIConfigRead
 from app.schemas.ai_prompt_preset import AIPromptPresetCreate, AIPromptPresetUpdate, AIPromptPresetRead
 from app.schemas.ai_generate import GenerateOutlineRequest, GenerateScriptRequest, BatchGenerateRequest, GenerateNextEpisodeRequest, OutlineResult
 from app.schemas.common import ApiResponse
+from app.services.ai_usage_service import ai_usage_service
 
 router = APIRouter()
+
+
+@router.get("/usage", response_model=ApiResponse[dict])
+async def get_usage():
+    return ApiResponse(data=ai_usage_service.summary())
+
+
+@router.delete("/usage", response_model=ApiResponse[dict])
+async def reset_usage():
+    return ApiResponse(data=ai_usage_service.reset())
 
 
 # --- AI Configs ---

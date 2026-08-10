@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useNovelStore } from '../stores/novelStore'
 import { novelAiApi } from '../services/api/novelAiApi'
-import type { KnowledgeGraph } from '../services/api/novelAiApi'
+import type { CanonArchive } from '../services/api/novelAiApi'
 import { novelApi } from '../services/api/novelApi'
 import { chapterApi } from '../services/api/chapterApi'
 import { exportTxt } from '../utils/export'
 import type { ChapterOutlineItem } from '../types/models'
 import { usePersistentState } from '../stores/persistentTaskStore'
+import CanonArchivePanel from '../components/CanonArchivePanel'
 
 export default function NovelDetail() {
   const { novelId } = useParams<{ novelId: string }>()
@@ -24,7 +25,7 @@ export default function NovelDetail() {
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(new Set())
   const [deleting, setDeleting] = useState(false)
 
-  const [graph, setGraph] = usePersistentState<KnowledgeGraph | null>(`novel:${novelId}:graph`, null)
+  const [graph, setGraph] = usePersistentState<CanonArchive | null>(`novel:${novelId}:graph`, null)
   const [showGraph, setShowGraph] = useState(false)
   const [graphLoading, setGraphLoading] = useState(false)
   const [rebuildingGraph, setRebuildingGraph] = usePersistentState(`novel:${novelId}:rebuildingGraph`, false)
@@ -48,6 +49,12 @@ export default function NovelDetail() {
     }
   }, [currentNovel])
 
+  useEffect(() => {
+    if (currentNovel?.total_chapters) {
+      setTotalChapters(currentNovel.total_chapters)
+    }
+  }, [currentNovel?.total_chapters])
+
   const [generatingProgress, setGeneratingProgress] = usePersistentState<{ done: number; total: number } | null>(`novel:${novelId}:generatingProgress`, null)
 
   const handleGenerateOutline = async () => {
@@ -56,56 +63,90 @@ export default function NovelDetail() {
       alert('章节数必须是 1–200 之间的整数')
       return
     }
-    setGenerating(true)
-    setOutline([])
-    setGeneratingProgress({ done: 0, total: totalChapters })
-
     const BATCH = 5
-    let accumulated: ChapterOutlineItem[] = []
+    let storedOutlineData: any = null
+    if (currentNovel.outline) {
+      try {
+        storedOutlineData = JSON.parse(currentNovel.outline)
+      } catch {
+        // Fall back to the already rendered outline when legacy JSON is malformed.
+      }
+    }
+    const authoritativeOutline: ChapterOutlineItem[] =
+      Array.isArray(storedOutlineData?.chapters) ? storedOutlineData.chapters : outline
+    const existingByNumber = new Map(
+      authoritativeOutline
+        .filter(item => item.chapter_number >= 1 && item.chapter_number <= totalChapters)
+        .map(item => [item.chapter_number, item]),
+    )
+    let accumulated = Array.from(existingByNumber.values())
+      .sort((a, b) => a.chapter_number - b.chapter_number)
+    const missingNumbers = Array.from(
+      { length: totalChapters },
+      (_, index) => index + 1,
+    ).filter(chapterNumber => !existingByNumber.has(chapterNumber))
+
+    if (missingNumbers.length === 0) {
+      alert(`大纲已完整生成，共 ${totalChapters} 章，无需重复生成。`)
+      return
+    }
+
+    // Group only missing consecutive chapters, at most five per request.
+    // This makes the operation resumable after a network/provider failure.
+    const remaining: Array<{ start: number; end: number }> = []
+    for (const chapterNumber of missingNumbers) {
+      const current = remaining[remaining.length - 1]
+      if (
+        current
+        && chapterNumber === current.end + 1
+        && current.end - current.start + 1 < BATCH
+      ) {
+        current.end = chapterNumber
+      } else {
+        remaining.push({ start: chapterNumber, end: chapterNumber })
+      }
+    }
+
+    let theme = storedOutlineData?.theme || ''
+
+    setGenerating(true)
+    setOutline([...accumulated])
+    setGeneratingProgress({
+      done: totalChapters - missingNumbers.length,
+      total: totalChapters,
+    })
 
     try {
-      // First batch to get the theme
-      const firstEnd = Math.min(BATCH, totalChapters)
-      const firstRes = await novelAiApi.generateOutline({
-        novel_id: Number(novelId),
-        total_chapters: totalChapters,
-        start_chapter: 1,
-        end_chapter: firstEnd,
-      })
-      const theme = firstRes.data?.theme || ''
-      accumulated = [...(firstRes.data?.chapters || [])]
-      setOutline([...accumulated])
-      setGeneratingProgress({ done: firstEnd, total: totalChapters })
-
-      // Remaining batches in parallel groups of 4
-      const remaining: Array<{ start: number; end: number }> = []
-      for (let start = firstEnd + 1; start <= totalChapters; start += BATCH) {
-        remaining.push({ start, end: Math.min(start + BATCH - 1, totalChapters) })
-      }
-
       // Serialize persistence batches. Concurrent requests used to read the
       // same old outline and overwrite one another (50 chapters could become 25).
-      const CONCURRENCY = 1
-      for (let i = 0; i < remaining.length; i += CONCURRENCY) {
-        const group = remaining.slice(i, i + CONCURRENCY)
-        const results = await Promise.all(
-          group.map(({ start, end }) =>
-            novelAiApi.generateOutline({
-              novel_id: Number(novelId),
-              total_chapters: totalChapters,
-              start_chapter: start,
-              end_chapter: end,
-              theme,
-            })
-          )
-        )
-        for (const res of results) {
-          if (res.data?.chapters) accumulated.push(...res.data.chapters)
+      let generatedCount = 0
+      for (const { start, end } of remaining) {
+        const res = await novelAiApi.generateOutline({
+          novel_id: Number(novelId),
+          total_chapters: totalChapters,
+          start_chapter: start,
+          end_chapter: end,
+          theme,
+        })
+        if (!theme && res.data?.theme) {
+          theme = res.data.theme
         }
-        accumulated.sort((a, b) => a.chapter_number - b.chapter_number)
+        if (res.data?.chapters) {
+          const merged = new Map(
+            accumulated.map(item => [item.chapter_number, item]),
+          )
+          for (const item of res.data.chapters) {
+            merged.set(item.chapter_number, item)
+          }
+          accumulated = Array.from(merged.values())
+            .sort((a, b) => a.chapter_number - b.chapter_number)
+        }
         setOutline([...accumulated])
-        const lastDone = group[group.length - 1].end
-        setGeneratingProgress({ done: lastDone, total: totalChapters })
+        generatedCount += end - start + 1
+        setGeneratingProgress({
+          done: totalChapters - missingNumbers.length + generatedCount,
+          total: totalChapters,
+        })
       }
 
       // The backend is authoritative: every serialized batch has already been
@@ -129,6 +170,37 @@ export default function NovelDetail() {
     } finally {
       setGenerating(false)
       setGeneratingProgress(null)
+    }
+  }
+
+  const handleClearOutline = async () => {
+    if (!novelId || !currentNovel || generating) return
+    const confirmed = window.confirm(
+      '确定清空当前大纲并重新规划吗？\n\n'
+      + '将清除：章节大纲、固定路线图、状态账本、不可逆事实、连续性审核和旧图谱。\n'
+      + '不会删除已经同步的章节和正文内容。\n\n'
+      + '清空后再次点击“AI 生成大纲”，将从第 1 章重新生成。',
+    )
+    if (!confirmed) return
+
+    try {
+      await novelApi.update(Number(novelId), {
+        outline: '',
+        story_roadmap: '',
+        state_ledger: '',
+        canon_facts: '[]',
+        continuity_audits: '[]',
+        knowledge_graph: '',
+      })
+      setOutline([])
+      setGraph(null)
+      setGeneratingProgress(null)
+      setSelectedChapters(new Set())
+      await fetchNovel(Number(novelId))
+      alert('大纲规划数据已清空。再次点击“AI 生成大纲”将从第 1 章重新生成。')
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail
+      alert('清空大纲失败：' + (typeof detail === 'string' ? detail : e?.message || '未知错误'))
     }
   }
 
@@ -250,9 +322,8 @@ export default function NovelDetail() {
     if (!novelId) return
     setGraphLoading(true)
     try {
-      const res = await novelAiApi.getGraph(Number(novelId))
-      const raw: KnowledgeGraph = res.data || { characters: [], events: [] }
-      setGraph({ characters: raw.characters || [], events: raw.events || [] })
+      const res = await novelAiApi.getArchive(Number(novelId))
+      if (res.data) setGraph(res.data)
       setShowGraph(true)
     } catch (e) {
       alert('加载图谱失败: ' + String(e))
@@ -267,7 +338,7 @@ export default function NovelDetail() {
     setRebuildProgress(null)
     try {
       await novelAiApi.clearGraph(Number(novelId))
-      setGraph({ characters: [], events: [] })
+      setGraph(null)
 
       const chaptersRes = await novelAiApi.getChaptersWithContent(Number(novelId))
       const chapters = chaptersRes.data || []
@@ -281,16 +352,15 @@ export default function NovelDetail() {
       for (let i = 0; i < chapters.length; i++) {
         const ch = chapters[i]
         try {
-          const res = await novelAiApi.updateGraphFromChapter(Number(novelId), ch.id)
-          if (res.data) {
-            setGraph({ characters: res.data.characters || [], events: res.data.events || [] })
-          }
+          await novelAiApi.updateGraphFromChapter(Number(novelId), ch.id)
           setRebuildProgress({ done: i + 1, total: chapters.length })
         } catch (e) {
           console.error(`Failed to update graph for chapter ${ch.chapter_number}:`, e)
         }
       }
 
+      const archiveRes = await novelAiApi.getArchive(Number(novelId))
+      if (archiveRes.data) setGraph(archiveRes.data)
       setShowGraph(true)
       alert('图谱重建完成！')
     } catch (e) {
@@ -322,15 +392,15 @@ export default function NovelDetail() {
   return (
     <div style={{ maxWidth: 1000 }}>
       <div style={{ marginBottom: 24 }}>
-        <Link to="/novels" style={{ color: '#666', textDecoration: 'none', fontSize: 14 }}>← 返回小说列表</Link>
+        <Link to="/novels" style={{ color: 'var(--text-2)', textDecoration: 'none', fontSize: 14 }}>← 返回小说列表</Link>
       </div>
 
       <div style={{ marginBottom: 32 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h1 className="page-title">{currentNovel.title}</h1>
-            {currentNovel.genre && <div style={{ color: '#666', marginBottom: 8 }}>{currentNovel.genre}</div>}
-            <div style={{ color: '#888', lineHeight: 1.6 }}>{currentNovel.synopsis}</div>
+            {currentNovel.genre && <div style={{ color: 'var(--text-2)', marginBottom: 8 }}>{currentNovel.genre}</div>}
+            <div style={{ color: 'var(--text-2)', lineHeight: 1.6 }}>{currentNovel.synopsis}</div>
           </div>
           <button
             className="btn btn-ghost"
@@ -381,8 +451,20 @@ export default function NovelDetail() {
               ? generatingProgress
                 ? `生成、审核与返修中 ${generatingProgress.done}/${generatingProgress.total}...`
                 : '生成、审核与返修中...'
-              : 'AI 生成大纲'}
+              : outline.length > 0
+                ? '继续生成未完成大纲'
+                : 'AI 生成大纲'}
           </button>
+          {outline.length > 0 && (
+            <button
+              className="btn"
+              onClick={handleClearOutline}
+              disabled={generating}
+              style={{ color: 'var(--danger)', borderColor: 'rgba(255,69,58,.55)' }}
+            >
+              清空大纲
+            </button>
+          )}
           {outline.length > 0 && (
             <button className="btn" onClick={handleSyncToChapters} disabled={syncingAll}>
               {syncingAll && syncProgress
@@ -392,9 +474,9 @@ export default function NovelDetail() {
           )}
         </div>
         {outline.length > 0 && (
-          <div style={{ maxHeight: 400, overflow: 'auto', border: '1px solid #e0e0e0', borderRadius: 6, padding: 12 }}>
+          <div style={{ maxHeight: 400, overflow: 'auto', border: '.5px solid var(--border)', borderRadius: 12, padding: 12, background: 'rgba(255,255,255,.90)' }}>
             {outline.map((item, i) => (
-              <div key={item.chapter_number} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #f0f0f0' }}>
+              <div key={item.chapter_number} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '.5px solid var(--border-soft)' }}>
                 {editingIndex === i ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <input
@@ -420,7 +502,7 @@ export default function NovelDetail() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>第 {item.chapter_number} 章：{item.title}</div>
-                      <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{item.synopsis}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>{item.synopsis}</div>
                     </div>
                     <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                       <button
@@ -445,13 +527,18 @@ export default function NovelDetail() {
         )}
       </div>
 
-      {/* Knowledge Graph */}
+      {/* Canon archive / knowledge graph */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontWeight: 600 }}>图谱（人物关系 & 事件）</div>
+          <div>
+            <div style={{ fontWeight: 700 }}>正史档案与图谱</div>
+            <div style={{ color: 'var(--text-2)', fontSize: 12, marginTop: 2 }}>
+              人物、资产、交易、物品、时间线和不可逆事实都会成为后续章节的生成约束
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-sm" onClick={handleLoadGraph} disabled={graphLoading}>
-              {graphLoading ? '加载中...' : showGraph ? '刷新' : '查看图谱'}
+              {graphLoading ? '加载中...' : showGraph ? '刷新档案' : '查看正史档案'}
             </button>
             <button className="btn btn-sm" onClick={handleRebuildGraph} disabled={rebuildingGraph}>
               {rebuildingGraph
@@ -464,67 +551,11 @@ export default function NovelDetail() {
         </div>
 
         {showGraph && graph && (
-          <div style={{ marginTop: 16 }}>
-            {/* Characters */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#555' }}>
-                人物关系 ({graph.characters.length})
-              </div>
-              {graph.characters.length === 0 ? (
-                <div style={{ color: '#999', fontSize: 13 }}>暂无人物数据</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {graph.characters.map((char, i) => (
-                    <div key={i} style={{ background: '#f8f8f8', borderRadius: 6, padding: '10px 12px', fontSize: 13 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{char.name}</span>
-                        <span style={{ fontSize: 11, color: '#888', background: '#e8e8e8', borderRadius: 4, padding: '1px 6px' }}>{char.role}</span>
-                      </div>
-                      {char.description && <div style={{ color: '#555', marginBottom: 4 }}>{char.description}</div>}
-                      {(char.relations || []).length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {(char.relations || []).map((r, j) => (
-                            <span key={j} style={{ fontSize: 11, color: '#666', background: '#efefef', borderRadius: 4, padding: '2px 6px' }}>
-                              {r.target} · {r.relation}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Events */}
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#555' }}>
-                关键事件 ({graph.events.length})
-              </div>
-              {graph.events.length === 0 ? (
-                <div style={{ color: '#999', fontSize: 13 }}>暂无事件数据</div>
-              ) : (
-                <div style={{ maxHeight: 300, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {graph.events.map((ev, i) => (
-                    <div key={i} style={{ background: '#f8f8f8', borderRadius: 6, padding: '8px 12px', fontSize: 13 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                        <span style={{ fontSize: 11, color: '#888', background: '#e8e8e8', borderRadius: 4, padding: '1px 6px' }}>第{ev.chapter}章</span>
-                        <span style={{ fontWeight: 600 }}>{ev.title}</span>
-                      </div>
-                      <div style={{ color: '#555' }}>{ev.description}</div>
-                      {(ev.related_characters || []).length > 0 && (
-                        <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {(ev.related_characters || []).map((c, j) => (
-                            <span key={j} style={{ fontSize: 11, color: '#666', background: '#efefef', borderRadius: 4, padding: '1px 6px' }}>{c}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+          <CanonArchivePanel
+            novelId={Number(novelId)}
+            archive={graph}
+            onChange={setGraph}
+          />
         )}
       </div>
 
@@ -534,7 +565,7 @@ export default function NovelDetail() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ fontWeight: 600 }}>章节列表 ({chapters.length})</div>
             {chapters.length > 0 && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#666', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-2)', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={selectedChapters.size === chapters.length && chapters.length > 0}
@@ -544,7 +575,7 @@ export default function NovelDetail() {
               </label>
             )}
             {selectedChapters.size > 0 && (
-              <button className="btn btn-sm" style={{ color: '#ef4444', borderColor: '#ef4444' }} onClick={handleBatchDelete} disabled={deleting}>
+              <button className="btn btn-sm" style={{ color: 'var(--danger)', borderColor: 'rgba(255,69,58,.55)' }} onClick={handleBatchDelete} disabled={deleting}>
                 {deleting ? '删除中...' : `删除选中 (${selectedChapters.size})`}
               </button>
             )}
@@ -557,7 +588,7 @@ export default function NovelDetail() {
         </div>
 
         {chapters.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>
             暂无章节，请先生成大纲并同步到章节
           </div>
         ) : (
@@ -577,18 +608,18 @@ export default function NovelDetail() {
                   to={`/novels/${novelId}/chapters/${chapter.id}`}
                   style={{ textDecoration: 'none', color: 'inherit', flex: 1 }}
                 >
-                  <div className="card" style={{ padding: 12, background: '#fafafa', color: '#1f2937', borderColor: '#d1d5db' }}>
+                  <div className="card" style={{ padding: 14, background: 'rgba(255,255,255,.90)', color: 'var(--text)', borderColor: 'var(--border-soft)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>第 {chapter.chapter_number} 章：{chapter.title}</div>
-                        {chapter.synopsis && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{chapter.synopsis}</div>}
+                        <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>第 {chapter.chapter_number} 章：{chapter.title}</div>
+                        {chapter.synopsis && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>{chapter.synopsis}</div>}
                       </div>
                     </div>
                   </div>
                 </Link>
                 <button
                   className="btn btn-sm"
-                  style={{ color: '#ef4444', borderColor: '#ef4444', flexShrink: 0 }}
+                  style={{ color: 'var(--danger)', borderColor: 'rgba(255,69,58,.55)', flexShrink: 0 }}
                   onClick={() => handleDeleteChapter(chapter.id)}
                 >
                   删除

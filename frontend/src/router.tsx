@@ -8,6 +8,7 @@ import NovelDetail from './pages/NovelDetail'
 import ChapterEditor from './pages/ChapterEditor'
 import NovelToScript from './pages/NovelToScript'
 import Settings from './pages/Settings'
+import WorkCenter from './pages/WorkCenter'
 
 function Placeholder({ title }: { title: string }) {
   return (
@@ -24,7 +25,8 @@ export const router = createHashRouter([
     path: '/',
     element: <Layout />,
     children: [
-      { index: true, element: <ProjectList /> },
+      { index: true, element: <WorkCenter /> },
+      { path: 'projects', element: <ProjectList /> },
       { path: 'projects/:projectId', element: <ProjectDetail /> },
       { path: 'projects/:projectId/episodes/:episodeId/script', element: <ScriptEditor /> },
       { path: 'novels', element: <NovelList /> },

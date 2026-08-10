@@ -36,10 +36,10 @@ export default function ActivationGate({ children }: { children: React.ReactNode
 
   const machineCode = license?.machine_code || ''
   return (
-    <div style={{ height: '100%', display: 'grid', placeItems: 'center', padding: 24, background: 'radial-gradient(circle at 50% 20%, #25214a 0, var(--bg) 48%)' }}>
-      <div className="card" style={{ width: 560, maxWidth: '96vw', padding: 28, boxShadow: '0 28px 90px rgba(0,0,0,.55)' }}>
+    <div style={{ height: '100%', display: 'grid', placeItems: 'center', padding: 24, background: 'radial-gradient(circle at 50% 18%, rgba(0,104,214,.18) 0, var(--bg) 48%)' }}>
+      <div className="card" style={{ width: 560, maxWidth: '96vw', padding: 28, boxShadow: '0 28px 90px rgba(43,67,92,.20)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
-          <div style={{ width: 48, height: 48, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, var(--accent), #a78bfa)', fontWeight: 800, fontSize: 22 }}>M</div>
+          <div style={{ width: 48, height: 48, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'linear-gradient(145deg, #53b6ff, var(--accent) 55%, #0067d8)', boxShadow: '0 8px 24px rgba(10,132,255,.28)', fontWeight: 800, fontSize: 22 }}>M</div>
           <div>
             <div style={{ fontSize: 20, fontWeight: 800 }}>激活 Mintext</div>
             <div style={{ color: 'var(--text-2)', fontSize: 13 }}>本软件采用一机一码限时离线授权</div>
@@ -52,7 +52,7 @@ export default function ActivationGate({ children }: { children: React.ReactNode
           <button className="btn btn-ghost" onClick={() => navigator.clipboard.writeText(machineCode)}>复制机器码</button>
         </div>
 
-        <div style={{ padding: 12, borderRadius: 6, background: 'var(--bg-3)', color: 'var(--text-2)', fontSize: 12, marginBottom: 18 }}>
+        <div style={{ padding: 12, borderRadius: 12, background: 'var(--bg-3)', color: 'var(--text-2)', fontSize: 12, marginBottom: 18 }}>
           将机器码发送给卖家购买限时激活码。激活码仅限当前电脑使用，到期后需要续费并输入新的激活码。
         </div>
 

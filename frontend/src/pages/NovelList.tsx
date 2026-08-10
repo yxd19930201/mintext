@@ -7,7 +7,6 @@ export default function NovelList() {
   const [title, setTitle] = useState('')
   const [genre, setGenre] = useState('')
   const [synopsis, setSynopsis] = useState('')
-  const [totalChapters, setTotalChapters] = useState(50)
   const [showForm, setShowForm] = useState(false)
 
   useEffect(() => { fetchNovels() }, [fetchNovels])
@@ -15,20 +14,14 @@ export default function NovelList() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim() || !synopsis.trim()) return
-    if (!Number.isInteger(totalChapters) || totalChapters < 1 || totalChapters > 200) {
-      alert('计划章节数必须是 1–200 之间的整数')
-      return
-    }
     await createNovel({
       title: title.trim(),
       genre: genre.trim() || undefined,
       synopsis: synopsis.trim(),
-      total_chapters: totalChapters,
     })
     setTitle('')
     setGenre('')
     setSynopsis('')
-    setTotalChapters(50)
     setShowForm(false)
   }
 
@@ -70,17 +63,6 @@ export default function NovelList() {
                 required
               />
             </div>
-            <div style={{ marginBottom: 14, maxWidth: 200 }}>
-              <label className="label">计划章节数</label>
-              <input
-                className="input"
-                type="number"
-                min={1}
-                max={200}
-                value={totalChapters}
-                onChange={e => setTotalChapters(Math.min(200, Math.max(1, Number(e.target.value) || 1)))}
-              />
-            </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="submit" className="btn btn-primary">创建</button>
               <button type="button" className="btn" onClick={() => setShowForm(false)}>取消</button>
@@ -97,11 +79,11 @@ export default function NovelList() {
           <div key={novel.id} className="card" style={{ position: 'relative' }}>
             <Link to={`/novels/${novel.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
               <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 15 }}>{novel.title}</div>
-              {novel.genre && <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>{novel.genre}</div>}
-              <div style={{ fontSize: 13, color: '#888', marginBottom: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+              {novel.genre && <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 8 }}>{novel.genre}</div>}
+              <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                 {novel.synopsis}
               </div>
-              <div style={{ fontSize: 12, color: '#999' }}>
+              <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
                 {novel.total_chapters ? `计划 ${novel.total_chapters} 章` : '未设置章节数'}
               </div>
             </Link>
@@ -122,7 +104,7 @@ export default function NovelList() {
       </div>
 
       {!loading && novels.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-3)' }}>
           暂无小说项目，点击「新建小说」开始创作
         </div>
       )}

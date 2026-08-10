@@ -33,7 +33,7 @@
     "wait-on": "^8.0.3"
   },
   "build": {
-    "appId": "com.minitext.desktop",
+    "appId": "com.mintext.creator.desktop.release",
     "productName": "Mintext",
     "artifactName": "${productName}-Setup-${version}.${ext}",
     "directories": { "output": "release" },
@@ -46,26 +46,30 @@
       {
         "from": "build/icon.png",
         "to": "icon.png"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
       }
     ],
     "asar": true,
-    "afterPack": "build/after-pack.cjs",
-    "afterSign": "build/after-sign.cjs",
     "win": {
       "target": ["nsis"],
       "icon": "build/icon.ico",
-      "executableName": "MintextApp"
+      "executableName": "MintextApp",
+      "signExecutable": false
     },
     "nsis": {
       "oneClick": false,
-      "perMachine": true,
-      "allowElevation": true,
+        "perMachine": false,
+        "allowElevation": false,
       "include": "build/installer.nsh",
+      "shortcutName": "Mintext创作工具",
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": "always",
-      "createStartMenuShortcut": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": false,
       "runAfterFinish": true,
-      "useZip": true,
+      "useZip": false,
       "deleteAppDataOnUninstall": false
     }
   }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, Menu, shell } = require('electron')
+const { app, BrowserWindow, dialog, Menu, shell, nativeTheme } = require('electron')
 const { spawn } = require('child_process')
 const fs = require('fs')
 const net = require('net')
@@ -109,6 +109,10 @@ function stopBundledServer() {
 }
 
 function createWindow(serverUrl) {
+  // Keep Windows caption buttons and native dialogs aligned with the app's
+  // light frosted-glass theme. Without this, the hidden title-bar overlay
+  // keeps Electron's old dark color above an otherwise light interface.
+  nativeTheme.themeSource = 'light'
   Menu.setApplicationMenu(null)
   mainWindow = new BrowserWindow({
     width: 1380,
@@ -116,13 +120,13 @@ function createWindow(serverUrl) {
     minWidth: 1024,
     minHeight: 680,
     show: false,
-    backgroundColor: '#101014',
+    backgroundColor: '#eef4fb',
     icon: path.join(process.resourcesPath, 'icon.png'),
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#1a1d27',
-      symbolColor: '#e8eaf6',
+      color: '#f5f8fc',
+      symbolColor: '#101318',
       height: 32,
     },
     webPreferences: {

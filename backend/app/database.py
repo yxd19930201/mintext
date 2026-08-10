@@ -47,3 +47,15 @@ async def init_db():
         for name, sql_type in additions.items():
             if name not in columns:
                 await conn.execute(text(f"ALTER TABLE novels ADD COLUMN {name} {sql_type}"))
+
+        def existing_ai_config_columns(sync_conn):
+            return {column["name"] for column in inspect(sync_conn).get_columns("ai_configs")}
+
+        ai_columns = await conn.run_sync(existing_ai_config_columns)
+        ai_additions = {
+            "input_price_cny": "REAL NOT NULL DEFAULT 0",
+            "output_price_cny": "REAL NOT NULL DEFAULT 0",
+        }
+        for name, sql_type in ai_additions.items():
+            if name not in ai_columns:
+                await conn.execute(text(f"ALTER TABLE ai_configs ADD COLUMN {name} {sql_type}"))

@@ -93,7 +93,7 @@ export default function ProjectList() {
         </div>
       )}
       {error && (
-        <div style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', color: 'var(--danger)', fontSize: 13 }}>
+        <div style={{ background: 'rgba(255,69,58,.1)', border: '.5px solid rgba(255,69,58,.5)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', color: 'var(--danger)', fontSize: 13 }}>
           {error}
         </div>
       )}
@@ -115,10 +115,10 @@ export default function ProjectList() {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                 <div style={{
-                  width: 36, height: 36, borderRadius: 8,
-                  background: `hsl(${(p.id * 47) % 360}, 60%, 25%)`,
+                  width: 36, height: 36, borderRadius: 10,
+                  background: 'var(--accent-dim)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 16, fontWeight: 700, color: `hsl(${(p.id * 47) % 360}, 80%, 75%)`,
+                  fontSize: 16, fontWeight: 700, color: 'var(--accent-hover)',
                 }}>
                   {p.title[0]}
                 </div>

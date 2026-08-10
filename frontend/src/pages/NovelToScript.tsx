@@ -193,7 +193,7 @@ export default function NovelToScript() {
         </div>
 
         {chapters.length > 0 && (
-          <div style={{ border: '1px solid #34384b', borderRadius: 6, padding: 12, marginBottom: 16, maxHeight: 220, overflow: 'auto' }}>
+          <div style={{ border: '.5px solid var(--border)', borderRadius: 12, padding: 12, marginBottom: 16, maxHeight: 220, overflow: 'auto', background: 'rgba(255,255,255,.90)' }}>
             <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, fontSize: 13 }}>
               <input
                 type="checkbox"
@@ -222,7 +222,7 @@ export default function NovelToScript() {
         )}
 
         {sourceNovelId && chapters.length === 0 && (
-          <div style={{ border: '1px solid #7c5b24', background: '#2a2418', color: '#e8c77a', borderRadius: 6, padding: 12, marginBottom: 16, fontSize: 13 }}>
+          <div style={{ border: '.5px solid rgba(255,214,10,.25)', background: 'rgba(255,214,10,.08)', color: 'var(--warning)', borderRadius: 12, padding: 12, marginBottom: 16, fontSize: 13 }}>
             该小说目前只有章节大纲，没有已生成的章节正文。请先进入“小说创作”生成具体章节内容，再进行短剧转换。
           </div>
         )}
@@ -277,7 +277,7 @@ export default function NovelToScript() {
             maxLength={50000}
             style={{ fontFamily: 'monospace', fontSize: 13, lineHeight: 1.8 }}
           />
-          <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
             {novelText.length} / 50000 字
           </div>
         </div>
@@ -366,7 +366,7 @@ export default function NovelToScript() {
       )}
 
       {episodes.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 60, color: '#999' }}>
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-3)' }}>
           请先选择小说章节导入，再点击「转换为短剧」开始
         </div>
       )}

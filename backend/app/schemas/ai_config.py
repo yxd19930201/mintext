@@ -9,6 +9,8 @@ class AIConfigCreate(BaseModel):
     api_key: str
     model: str
     is_default: bool = False
+    input_price_cny: float = 0
+    output_price_cny: float = 0
 
 
 class AIConfigUpdate(BaseModel):
@@ -17,6 +19,8 @@ class AIConfigUpdate(BaseModel):
     api_key: Optional[str] = None
     model: Optional[str] = None
     is_default: Optional[bool] = None
+    input_price_cny: Optional[float] = None
+    output_price_cny: Optional[float] = None
 
 
 class AIConfigRead(BaseModel):
@@ -26,6 +30,8 @@ class AIConfigRead(BaseModel):
     api_key: str
     model: str
     is_default: bool
+    input_price_cny: float = 0
+    output_price_cny: float = 0
     created_at: datetime
     updated_at: datetime
 

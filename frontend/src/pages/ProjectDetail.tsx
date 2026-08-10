@@ -476,7 +476,7 @@ export default function ProjectDetail() {
                 </div>
                 {batchResult && (
                   <div style={{ marginTop: 10, fontSize: 13, color: 'var(--text-2)' }}>
-                    完成：共 {batchResult.total} 集，成功 <span style={{ color: '#34d399' }}>{batchResult.succeeded}</span>，失败 <span style={{ color: 'var(--danger)' }}>{batchResult.failed}</span>
+                    完成：共 {batchResult.total} 集，成功 <span style={{ color: 'var(--success)' }}>{batchResult.succeeded}</span>，失败 <span style={{ color: 'var(--danger)' }}>{batchResult.failed}</span>
                   </div>
                 )}
               </div>

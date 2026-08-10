@@ -65,6 +65,8 @@ export interface AIConfig {
   api_key: string
   model: string
   is_default: boolean
+  input_price_cny: number
+  output_price_cny: number
   created_at: string
   updated_at: string
 }

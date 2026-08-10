@@ -9,9 +9,9 @@ import type { Script, Episode } from '../types/models'
 import { usePersistentState } from '../stores/persistentTaskStore'
 
 const STATUS_COLOR: Record<string, string> = {
-  draft: '#8b90b8',
-  generated: '#34d399',
-  reviewed: '#7c6af7',
+  draft: 'var(--text-2)',
+  generated: 'var(--success)',
+  reviewed: 'var(--accent)',
 }
 
 export default function ScriptEditor() {

@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
@@ -56,7 +57,7 @@ async def update_chapter(
     user_id: int = Depends(get_current_user_id),
 ):
     from app.services.novel_service import NovelService
-    await NovelService(db).get_novel(novel_id, user_id)
+    novel = await NovelService(db).get_novel(novel_id, user_id)
 
     repo = ChapterRepository(db)
     chapter = await repo.get(chapter_id)
@@ -66,6 +67,32 @@ async def update_chapter(
 
     update_data = data.model_dump(exclude_unset=True)
     chapter = await repo.update(chapter, **update_data)
+
+    # The chapters table and novels.outline are two views of the same
+    # chapter contract. Keep them atomic. If title/synopsis changes, old
+    # derived continuity fields are invalid and must not constrain a new
+    # draft with stale wealth, timeline or irreversible facts.
+    if novel.outline and ({"title", "synopsis"} & set(update_data)):
+        try:
+            outline_data = json.loads(novel.outline)
+        except (TypeError, json.JSONDecodeError):
+            outline_data = {}
+        chapters = outline_data.get("chapters", [])
+        for item in chapters:
+            if item.get("chapter_number") != chapter.chapter_number:
+                continue
+            if "title" in update_data:
+                item["title"] = chapter.title
+            if "synopsis" in update_data:
+                item["synopsis"] = chapter.synopsis or ""
+            for stale in (
+                "before_state", "after_state", "irreversible_facts",
+                "transition", "speech_constraints",
+                "relationship_changes", "address_changes",
+            ):
+                item.pop(stale, None)
+            break
+        novel.outline = json.dumps(outline_data, ensure_ascii=False)
     await db.commit()
     return ApiResponse(data=chapter)
 
