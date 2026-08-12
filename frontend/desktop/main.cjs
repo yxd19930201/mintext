@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, Menu, shell, nativeTheme } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell, nativeTheme } = require('electron')
 const { spawn } = require('child_process')
 const fs = require('fs')
 const net = require('net')
@@ -10,6 +10,8 @@ const stableUserDataDir = path.join(app.getPath('appData'), 'Mintext')
 app.setPath('userData', stableUserDataDir)
 
 let serverProcess = null
+let webAiProcess = null
+let webAiUrl = null
 let mainWindow = null
 let quitting = false
 
@@ -55,12 +57,12 @@ function findFreePort() {
   })
 }
 
-function waitForServer(url, timeoutMs = 60000) {
+function waitForServer(url, timeoutMs = 60000, processHandle = serverProcess, label = '内置服务') {
   const deadline = Date.now() + timeoutMs
   return new Promise((resolve, reject) => {
     const check = async () => {
-      if (serverProcess?.exitCode !== null) {
-        reject(new Error(`内置服务已退出，退出码：${serverProcess.exitCode}`))
+      if (processHandle?.exitCode !== null) {
+        reject(new Error(`${label}已退出，退出码：${processHandle.exitCode}`))
         return
       }
       try {
@@ -70,14 +72,49 @@ function waitForServer(url, timeoutMs = 60000) {
           return
         }
       } catch (_) {}
-      if (Date.now() >= deadline) reject(new Error('内置服务启动超时'))
+      if (Date.now() >= deadline) reject(new Error(`${label}启动超时`))
       else setTimeout(check, 300)
     }
     check()
   })
 }
 
-async function startBundledServer() {
+async function startWebAiAdapter() {
+  const port = app.isPackaged ? await findFreePort() : 4310
+  const adapterRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'web-ai-adapter')
+    : path.join(__dirname, '..', '..', 'web-ai-adapter')
+  const entry = path.join(adapterRoot, 'dist', 'server.js')
+  if (!fs.existsSync(entry)) throw new Error(`找不到网页版 AI 适配器：${entry}`)
+
+  const runtimeRoot = path.join(app.getPath('userData'), 'web-ai')
+  fs.mkdirSync(runtimeRoot, { recursive: true })
+  const log = fs.openSync(path.join(app.getPath('userData'), 'web-ai.log'), 'a')
+  webAiProcess = spawn(process.execPath, [entry], {
+    cwd: adapterRoot,
+    windowsHide: true,
+    stdio: ['ignore', log, log],
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      PORT: String(port),
+      WEB_AI_PROFILE_ROOT: path.join(runtimeRoot, 'profiles'),
+      WEB_AI_IDEMPOTENCY_ROOT: path.join(runtimeRoot, 'idempotency'),
+      WEB_AI_DIAGNOSTICS_ROOT: path.join(runtimeRoot, 'diagnostics'),
+      WEB_AI_PREWARM: 'false',
+      WEB_AI_HEADLESS: 'false',
+    },
+  })
+  webAiProcess.on('error', error => {
+    if (!quitting) dialog.showErrorBox('网页版 AI 服务错误', error.message)
+  })
+  const url = `http://127.0.0.1:${port}`
+  await waitForServer(url, 60000, webAiProcess, '网页版 AI 服务')
+  webAiUrl = url
+  return url
+}
+
+async function startBundledServer(adapterUrl) {
   const override = externalServerUrl()
   if (override) return override
   if (!app.isPackaged) return 'http://127.0.0.1:8000'
@@ -93,6 +130,7 @@ async function startBundledServer() {
   ], {
     windowsHide: true,
     stdio: ['ignore', log, log],
+    env: { ...process.env, MINITEXT_WEB_AI_URL: adapterUrl },
   })
   serverProcess.on('error', error => {
     if (!quitting) dialog.showErrorBox('Mintext 服务错误', error.message)
@@ -105,7 +143,36 @@ async function startBundledServer() {
 function stopBundledServer() {
   quitting = true
   if (serverProcess && serverProcess.exitCode === null) serverProcess.kill()
+  if (webAiProcess && webAiProcess.exitCode === null) webAiProcess.kill()
   serverProcess = null
+  webAiProcess = null
+}
+
+function configureWebAiIpc() {
+  ipcMain.removeHandler('web-ai-status')
+  ipcMain.removeHandler('web-ai-probe')
+  ipcMain.removeHandler('web-ai-login')
+  ipcMain.handle('web-ai-status', async () => {
+    const response = await fetch(`${webAiUrl}/v1/providers`)
+    if (!response.ok) throw new Error(`网页版 AI 状态检查失败：HTTP ${response.status}`)
+    return response.json()
+  })
+  ipcMain.handle('web-ai-probe', async (_event, provider) => {
+    const response = await fetch(`${webAiUrl}/v1/providers/${encodeURIComponent(provider)}/probe`)
+    const body = await response.json()
+    if (!response.ok) throw new Error(body?.error?.message || `渠道检测失败：HTTP ${response.status}`)
+    return body
+  })
+  ipcMain.handle('web-ai-login', async (_event, provider) => {
+    const response = await fetch(`${webAiUrl}/v1/providers/${encodeURIComponent(provider)}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ timeoutMs: 10 * 60_000 }),
+    })
+    const body = await response.json()
+    if (!response.ok) throw new Error(body?.error?.message || `网页登录失败：HTTP ${response.status}`)
+    return body
+  })
 }
 
 function createWindow(serverUrl) {
@@ -162,7 +229,9 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   try {
     backupUserDatabaseBeforeUpgrade()
-    const url = await startBundledServer()
+    const adapterUrl = await startWebAiAdapter()
+    const url = await startBundledServer(adapterUrl)
+    configureWebAiIpc()
     createWindow(url)
   } catch (error) {
     dialog.showErrorBox('Mintext 启动失败', `${error.message}\n\n日志：${path.join(app.getPath('userData'), 'server.log')}`)
@@ -173,7 +242,7 @@ app.whenReady().then(async () => {
       mainWindow.show()
       mainWindow.focus()
     } else {
-      startBundledServer().then(createWindow).catch(error => {
+      startBundledServer(webAiUrl).then(createWindow).catch(error => {
         dialog.showErrorBox('Mintext 启动失败', error.message)
       })
     }

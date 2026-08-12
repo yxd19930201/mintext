@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.routers.v1 import auth, projects, characters, episodes, scripts, ai, novels, chapters, novel_ai, conversion, license
+from app.routers.v1 import auth, projects, characters, episodes, scripts, ai, novels, chapters, novel_ai, conversion, license, manuscript_inspection
 
 router = APIRouter()
 
@@ -14,3 +14,4 @@ router.include_router(chapters.router, prefix="/novels", tags=["chapters"])
 router.include_router(novel_ai.router, prefix="/novel-ai", tags=["novel-ai"])
 router.include_router(conversion.router, prefix="/conversion", tags=["conversion"])
 router.include_router(license.router, prefix="/license", tags=["license"])
+router.include_router(manuscript_inspection.router, prefix="/manuscript", tags=["manuscript-inspection"])

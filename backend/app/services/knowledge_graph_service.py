@@ -11,6 +11,7 @@ from app.repositories.chapter_repo import ChapterRepository
 from app.repositories.chapter_content_repo import ChapterContentRepository
 from app.repositories.ai_config_repo import AIConfigRepository
 from app.services.ai_service import ai_service
+from app.services.generation_mode_service import resolve_generation_config
 from app.services.structured_ledger_service import (
     normalize_canon_facts,
     normalize_state_ledger,
@@ -161,7 +162,7 @@ class KnowledgeGraphService:
         self.content_repo = ChapterContentRepository(db)
         self.ai_config_repo = AIConfigRepository(db)
 
-    async def update_graph_from_chapter(self, novel_id: int, chapter_id: int, owner_id: int) -> dict:
+    async def update_graph_from_chapter(self, novel_id: int, chapter_id: int, owner_id: int, options=None) -> dict:
         """Update graph using the latest content of a specific chapter."""
         novel = await self.novel_repo.get_by_id_and_owner(novel_id, owner_id)
         if not novel:
@@ -176,11 +177,11 @@ class KnowledgeGraphService:
         if not content_obj or not content_obj.content:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chapter has no content")
 
-        ai_config = None
-        if novel.ai_config_id:
-            ai_config = await self.ai_config_repo.get(novel.ai_config_id)
-        if not ai_config:
-            ai_config = await self.ai_config_repo.get_default()
+        ai_config = await resolve_generation_config(
+            self.ai_config_repo,
+            options,
+            entity_config_id=novel.ai_config_id,
+        )
 
         # Filter existing graph before passing to AI so stale characters don't get carried forward
         existing_graph_raw = novel.knowledge_graph or ""
@@ -330,18 +331,18 @@ class KnowledgeGraphService:
         await self.db.commit()
         return _archive_payload(novel)
 
-    async def rebuild_graph(self, novel_id: int, owner_id: int) -> dict:
+    async def rebuild_graph(self, novel_id: int, owner_id: int, options=None) -> dict:
         """Rebuild graph from scratch by processing all chapters with content.
         Each chapter is extracted independently, then all results are merged in code."""
         novel = await self.novel_repo.get_by_id_and_owner(novel_id, owner_id)
         if not novel:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Novel not found")
 
-        ai_config = None
-        if novel.ai_config_id:
-            ai_config = await self.ai_config_repo.get(novel.ai_config_id)
-        if not ai_config:
-            ai_config = await self.ai_config_repo.get_default()
+        ai_config = await resolve_generation_config(
+            self.ai_config_repo,
+            options,
+            entity_config_id=novel.ai_config_id,
+        )
 
         chapters = await self.chapter_repo.get_by_novel(novel_id)
         chapters.sort(key=lambda c: c.chapter_number)

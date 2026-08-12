@@ -17,7 +17,8 @@ from app.repositories.novel_repo import NovelRepository
 from app.repositories.chapter_repo import ChapterRepository
 from app.repositories.chapter_content_repo import ChapterContentRepository
 from app.repositories.ai_config_repo import AIConfigRepository
-from app.services.ai_service import ai_service
+from app.services.ai_service import ai_service, normalize_chapter_paragraphs
+from app.services.generation_mode_service import resolve_generation_config
 from app.services.novel_skill_service import novel_skill_prompt
 from app.services.structured_ledger_service import (
     normalize_canon_facts,
@@ -1328,6 +1329,39 @@ def _normalize_outline_chapters(candidate, revised=None) -> list[dict]:
     return normalized
 
 
+def _align_outline_batch_numbers(
+    chapters: list[dict],
+    start_chapter: int,
+    end_chapter: int,
+) -> list[dict]:
+    """Assign application-owned chapter numbers to an AI-generated batch.
+
+    Web models often restart later batches at 1. Trusting those numbers makes
+    every batch overwrite chapters 1-5 while progress falsely advances.
+    """
+    expected_numbers = list(range(start_chapter, end_chapter + 1))
+    if len(chapters) != len(expected_numbers):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                f"大纲批次数量不完整：请求第 {start_chapter}-{end_chapter} 章，"
+                f"应返回 {len(expected_numbers)} 章，实际返回 {len(chapters)} 章。"
+                "本批未写入，请重试。"
+            ),
+        )
+
+    supplied_numbers = [_chapter_number(item.get("chapter_number")) for item in chapters]
+    if supplied_numbers == expected_numbers:
+        return chapters
+
+    aligned: list[dict] = []
+    for chapter_number, item in zip(expected_numbers, chapters):
+        corrected = dict(item)
+        corrected["chapter_number"] = chapter_number
+        aligned.append(corrected)
+    return aligned
+
+
 def _apply_dialogue_and_relationship_changes(
     ledger: dict,
     chapter_outline: dict,
@@ -1426,15 +1460,12 @@ class NovelGenerateService:
         if not novel:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Novel not found")
 
-        ai_config = None
-        if req.ai_config_id:
-            ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
-        elif novel.ai_config_id:
-            ai_config = await self.ai_config_repo.get(novel.ai_config_id)
-        if not ai_config:
-            ai_config = await self.ai_config_repo.get_default()
+        ai_config = await resolve_generation_config(
+            self.ai_config_repo,
+            req,
+            explicit_config_id=req.ai_config_id,
+            entity_config_id=novel.ai_config_id,
+        )
 
         logger.info(f"Using AI config: {ai_config.name if ai_config else 'None'}")
 
@@ -1530,7 +1561,11 @@ class NovelGenerateService:
             raise
 
         outline_data = json.loads(outline_json)
-        candidate_chapters = _normalize_outline_chapters(outline_data.get("chapters", []))
+        candidate_chapters = _align_outline_batch_numbers(
+            _normalize_outline_chapters(outline_data.get("chapters", [])),
+            req.start_chapter,
+            end_chapter,
+        )
         last_issues: list = []
         approved = req.economy_mode
         attempts = 0
@@ -1562,11 +1597,19 @@ class NovelGenerateService:
             last_issues = _as_issue_list(audit.get("issues"))
             revised = _as_chapter_list(audit.get("revised_chapters"))
             if _as_approved(audit.get("approved")):
-                candidate_chapters = _normalize_outline_chapters(candidate_chapters, revised)
+                candidate_chapters = _align_outline_batch_numbers(
+                    _normalize_outline_chapters(candidate_chapters, revised),
+                    req.start_chapter,
+                    end_chapter,
+                )
                 approved = True
                 break
             if revised:
-                candidate_chapters = _normalize_outline_chapters(candidate_chapters, revised)
+                candidate_chapters = _align_outline_batch_numbers(
+                    _normalize_outline_chapters(candidate_chapters, revised),
+                    req.start_chapter,
+                    end_chapter,
+                )
             if attempts < 3:
                 repaired = await ai_service.revise_outline_candidate(
                     synopsis=novel.synopsis,
@@ -1579,9 +1622,10 @@ class NovelGenerateService:
                     ai_config=ai_config,
                 )
                 if repaired:
-                    candidate_chapters = _normalize_outline_chapters(
-                        candidate_chapters,
-                        repaired,
+                    candidate_chapters = _align_outline_batch_numbers(
+                        _normalize_outline_chapters(candidate_chapters, repaired),
+                        req.start_chapter,
+                        end_chapter,
                     )
         audit_log.append(
             _audit_entry(
@@ -1643,6 +1687,8 @@ class NovelGenerateService:
     async def generate_chapter_content(
         self, chapter_id: int, req: GenerateChapterRequest, owner_id: int
     ) -> GenerateChapterResult:
+        if req.free_mode:
+            req.economy_mode = True
         # Get chapter and verify ownership
         chapter = await self.chapter_repo.get(chapter_id)
         if not chapter:
@@ -1692,16 +1738,12 @@ class NovelGenerateService:
             # a fresh AI draft is requested instead of replaying the same text.
             _delete_standard_checkpoint(chapter_id)
 
-        # Get AI config
-        ai_config = None
-        if req.ai_config_id:
-            ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
-        elif novel.ai_config_id:
-            ai_config = await self.ai_config_repo.get(novel.ai_config_id)
-        if not ai_config:
-            ai_config = await self.ai_config_repo.get_default()
+        ai_config = await resolve_generation_config(
+            self.ai_config_repo,
+            req,
+            explicit_config_id=req.ai_config_id,
+            entity_config_id=novel.ai_config_id,
+        )
 
         roadmap = _json_value(novel.story_roadmap, {})
         if not roadmap.get("stages"):
@@ -2501,6 +2543,9 @@ class NovelGenerateService:
                 ),
             )
 
+        # Web pages can expose visually separated paragraphs as one DOM text
+        # node. Never persist a full chapter as an unreadable single line.
+        content = normalize_chapter_paragraphs(content)
         word_count = len(content)
         existing = await self.content_repo.get_latest(chapter_id)
         if existing:
@@ -2553,6 +2598,8 @@ class NovelGenerateService:
     async def batch_generate_chapters(
         self, novel_id: int, req: BatchGenerateChaptersRequest, owner_id: int
     ) -> BatchGenerateResult:
+        if req.free_mode:
+            req.economy_mode = True
         # Verify novel ownership
         novel = await self.novel_repo.get_by_id_and_owner(novel_id, owner_id)
         if not novel:
@@ -2560,15 +2607,12 @@ class NovelGenerateService:
 
         # Validate configuration before entering the per-chapter error loop so
         # the UI can show one actionable "configure AI" message.
-        ai_config = None
-        if req.ai_config_id:
-            ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
-        elif novel.ai_config_id:
-            ai_config = await self.ai_config_repo.get(novel.ai_config_id)
-        if not ai_config:
-            ai_config = await self.ai_config_repo.get_default()
+        ai_config = await resolve_generation_config(
+            self.ai_config_repo,
+            req,
+            explicit_config_id=req.ai_config_id,
+            entity_config_id=novel.ai_config_id,
+        )
         ai_service._resolve(ai_config)
 
         # Get all chapters, sorted by chapter_number
@@ -2595,9 +2639,12 @@ class NovelGenerateService:
                 await self.generate_chapter_content(
                     chapter.id,
                     GenerateChapterRequest(
+                        generation_mode=req.generation_mode,
                         ai_config_id=req.ai_config_id,
                         system_prompt=req.system_prompt,
                         economy_mode=req.economy_mode,
+                        free_mode=req.free_mode,
+                        free_provider=req.free_provider,
                     ),
                     owner_id,
                 )
@@ -2620,6 +2667,8 @@ class NovelGenerateService:
     async def generate_next_chapter(
         self, novel_id: int, req: GenerateNextChapterRequest, owner_id: int
     ) -> GenerateNextChapterResult:
+        if req.free_mode:
+            req.economy_mode = True
         # Verify novel ownership
         novel = await self.novel_repo.get_by_id_and_owner(novel_id, owner_id)
         if not novel:
@@ -2635,16 +2684,12 @@ class NovelGenerateService:
         if not last_content or not last_content.content:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Last chapter has no content")
 
-        # Get AI config
-        ai_config = None
-        if req.ai_config_id:
-            ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
-        elif novel.ai_config_id:
-            ai_config = await self.ai_config_repo.get(novel.ai_config_id)
-        if not ai_config:
-            ai_config = await self.ai_config_repo.get_default()
+        ai_config = await resolve_generation_config(
+            self.ai_config_repo,
+            req,
+            explicit_config_id=req.ai_config_id,
+            entity_config_id=novel.ai_config_id,
+        )
 
         roadmap = _json_value(novel.story_roadmap, {})
         if not roadmap.get("stages"):
@@ -2752,9 +2797,12 @@ class NovelGenerateService:
         result = await self.generate_chapter_content(
             new_chapter.id,
             GenerateChapterRequest(
+                generation_mode=req.generation_mode,
                 ai_config_id=req.ai_config_id,
                 system_prompt=req.system_prompt,
                 economy_mode=req.economy_mode,
+                free_mode=req.free_mode,
+                free_provider=req.free_provider,
             ),
             owner_id,
         )

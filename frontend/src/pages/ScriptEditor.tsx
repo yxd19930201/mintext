@@ -82,10 +82,10 @@ export default function ScriptEditor() {
       ].join('\n')).join('\n\n')
       setStoryboard(text)
       setActiveTab('storyboard')
-      if (script) {
-        const updated = await scriptApi.update(epId, script.id, { ai_prompt: `__STORYBOARD__\n${text}` })
-        setScript(updated.data!)
-      }
+      const updated = script
+        ? await scriptApi.update(epId, script.id, { content, ai_prompt: `__STORYBOARD__\n${text}` })
+        : await scriptApi.create(epId, { content, ai_prompt: `__STORYBOARD__\n${text}` })
+      setScript(updated.data!)
     } catch (e) {
       alert('生成分镜失败：' + String(e))
     } finally {

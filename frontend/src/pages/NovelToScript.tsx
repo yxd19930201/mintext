@@ -107,8 +107,9 @@ export default function NovelToScript() {
       })
       if (res.data) {
         setEpisodes(res.data.episodes)
-        setSavedProjectId(null)
-        alert(`转换成功！生成了 ${res.data.total_episodes} 集短剧`)
+        const projectId = await persistEpisodes(res.data.episodes)
+        alert(`转换成功！生成了 ${res.data.total_episodes} 集短剧，并已自动保存到短剧项目`)
+        setSavedProjectId(projectId)
       }
     } catch (e) {
       alert('转换失败: ' + String(e))
@@ -120,6 +121,25 @@ export default function NovelToScript() {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
     alert('已复制到剪贴板')
+  }
+
+  const persistEpisodes = async (items: ConversionEpisode[]) => {
+    const sourceNovel = novels.find(novel => String(novel.id) === sourceNovelId)
+    const projRes = await projectApi.create({
+      title: sourceNovel ? `${sourceNovel.title}·短剧版` : `短剧项目 ${new Date().toLocaleDateString('zh-CN')}`,
+      synopsis: novelText.slice(0, 500),
+      total_episodes: items.length,
+    })
+    const projectId = projRes.data!.id
+    for (const ep of items) {
+      const epRes = await episodeApi.create(projectId, {
+        title: ep.title,
+        episode_number: ep.episode_number,
+        synopsis: ep.script.slice(0, 200),
+      })
+      await scriptApi.create(epRes.data!.id, { content: ep.script })
+    }
+    return projectId
   }
 
   const handleSaveToProject = async () => {
@@ -139,22 +159,7 @@ export default function NovelToScript() {
         }
       }
 
-      const projRes = await projectApi.create({
-        title: `短剧项目 ${new Date().toLocaleDateString('zh-CN')}`,
-        synopsis: novelText.slice(0, 500),
-        total_episodes: episodes.length,
-      })
-      const projectId = projRes.data!.id
-      for (const ep of episodes) {
-        const epRes = await episodeApi.create(projectId, {
-          title: ep.title,
-          episode_number: ep.episode_number,
-          synopsis: ep.script.slice(0, 200),
-        })
-        await scriptApi.create(epRes.data!.id, {
-          content: ep.script,
-        })
-      }
+      const projectId = await persistEpisodes(episodes)
       setSavedProjectId(projectId)
       alert(`已保存为项目，共 ${episodes.length} 集`)
       navigate(`/projects/${projectId}`)

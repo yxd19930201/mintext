@@ -1,0 +1,40 @@
+{
+  "name": "@mintext/web-ai-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mintext browser-based DeepSeek and ChatGPT adapter",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node --enable-source-maps dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "login:deepseek": "tsx src/login.ts deepseek",
+    "login:chatgpt": "tsx src/login.ts chatgpt",
+    "diagnose:deepseek": "tsx src/diagnose.ts deepseek",
+    "diagnose:chatgpt": "tsx src/diagnose.ts chatgpt",
+    "inspect:deepseek": "tsx src/inspect-mode.ts deepseek",
+    "test": "npm run typecheck"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "jsonrepair": "^3.13.1",
+    "playwright": "^1.54.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}

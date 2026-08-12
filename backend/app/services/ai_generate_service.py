@@ -10,6 +10,7 @@ from app.repositories.script_repo import ScriptRepository
 from app.repositories.ai_config_repo import AIConfigRepository
 from app.schemas.ai_generate import GenerateOutlineRequest, GenerateScriptRequest, BatchGenerateRequest, GenerateNextEpisodeRequest, OutlineResult
 from app.services.ai_service import ai_service
+from app.services.generation_mode_service import resolve_generation_config
 from app.services.creative_prompt_service import creative_prompt
 
 
@@ -21,13 +22,12 @@ class AIGenerateService:
         self.script_repo = ScriptRepository(db)
         self.ai_config_repo = AIConfigRepository(db)
 
-    async def _get_ai_config(self, config_id: int | None):
-        if config_id:
-            cfg = await self.ai_config_repo.get(config_id)
-            if not cfg:
-                raise HTTPException(status_code=404, detail="AI config not found")
-            return cfg
-        return await self.ai_config_repo.get_default()
+    async def _get_ai_config(self, config_id: int | None, options):
+        return await resolve_generation_config(
+            self.ai_config_repo,
+            options,
+            explicit_config_id=config_id,
+        )
 
     async def generate_outline(self, req: GenerateOutlineRequest, owner_id: int) -> OutlineResult:
         project = await self.project_repo.get(req.project_id)
@@ -37,7 +37,7 @@ class AIGenerateService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project has no synopsis")
 
         config_id = req.ai_config_id or project.ai_config_id
-        ai_config = await self._get_ai_config(config_id)
+        ai_config = await self._get_ai_config(config_id, req)
         system_prompt = req.system_prompt or project.system_prompt
 
         outline_json = await ai_service.generate_outline(
@@ -69,7 +69,7 @@ class AIGenerateService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
         config_id = req.ai_config_id or project.ai_config_id
-        ai_config = await self._get_ai_config(config_id)
+        ai_config = await self._get_ai_config(config_id, req)
         system_prompt = req.system_prompt or project.system_prompt
 
         context_parts = []
@@ -123,7 +123,7 @@ class AIGenerateService:
         # Fail once with the standard configuration prompt instead of returning
         # one opaque failure for every episode.
         config_id = req.ai_config_id or project.ai_config_id
-        ai_service._resolve(await self._get_ai_config(config_id))
+        ai_service._resolve(await self._get_ai_config(config_id, req))
 
         episodes = await self.episode_repo.list(project_id=req.project_id, limit=1000)
         # 按集号排序，保证衔接上下文按顺序生成
@@ -144,8 +144,11 @@ class AIGenerateService:
         errors: list[dict] = []
 
         script_req = GenerateScriptRequest(
+            generation_mode=req.generation_mode,
             ai_config_id=req.ai_config_id,
             system_prompt=req.system_prompt,
+            free_mode=req.free_mode,
+            free_provider=req.free_provider,
         )
 
         for ep in episodes:
@@ -165,7 +168,7 @@ class AIGenerateService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
         config_id = req.ai_config_id or project.ai_config_id
-        ai_config = await self._get_ai_config(config_id)
+        ai_config = await self._get_ai_config(config_id, req)
         system_prompt = req.system_prompt or project.system_prompt
 
         # 找到当前最后一集
@@ -224,7 +227,13 @@ class AIGenerateService:
         )
 
         # 第二步：生成剧本
-        script_req = GenerateScriptRequest(ai_config_id=req.ai_config_id, system_prompt=req.system_prompt)
+        script_req = GenerateScriptRequest(
+            generation_mode=req.generation_mode,
+            ai_config_id=req.ai_config_id,
+            system_prompt=req.system_prompt,
+            free_mode=req.free_mode,
+            free_provider=req.free_provider,
+        )
         result = await self.generate_script_for_episode(new_ep.id, script_req, owner_id)
 
         return {

@@ -8,6 +8,7 @@ import httpx
 from app.services.ai_service import AIService
 from app.schemas.novel_generate import ChapterOutlineItem, OutlineResult
 from app.services.novel_generate_service import (
+    _align_outline_batch_numbers,
     _apply_dialogue_and_relationship_changes,
     _as_approved,
     _as_chapter_list,
@@ -15,6 +16,37 @@ from app.services.novel_generate_service import (
     _normalize_outline_chapters,
     _preserve_stable_dialogue_state,
 )
+
+
+def test_later_outline_batch_numbers_are_owned_by_requested_interval():
+    model_batch = [
+        {
+            "chapter_number": number,
+            "title": f"模型第{number}章",
+            "synopsis": f"第{number}项情节",
+        }
+        for number in range(1, 6)
+    ]
+
+    aligned = _align_outline_batch_numbers(model_batch, 6, 10)
+
+    assert [item["chapter_number"] for item in aligned] == [6, 7, 8, 9, 10]
+    assert aligned[0]["title"] == "模型第1章"
+
+
+def test_incomplete_outline_batch_is_rejected_before_persistence():
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        _align_outline_batch_numbers(
+            [{"chapter_number": 1, "title": "一", "synopsis": "一"}],
+            6,
+            10,
+        )
+
+    assert exc.value.status_code == 502
+    assert "实际返回 1 章" in str(exc.value.detail)
 
 
 def test_ai_call_retries_connect_failure_before_provider_accepts_request():

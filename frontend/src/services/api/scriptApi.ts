@@ -1,5 +1,6 @@
 import { transport } from './index'
 import type { ApiResponse, PaginatedResponse, Script } from '../../types/models'
+import { getGenerationOptions } from '../generationMode'
 
 export const scriptApi = {
   list: (episodeId: number) =>
@@ -18,5 +19,5 @@ export const scriptApi = {
     transport.delete<void>(`/episodes/${episodeId}/scripts/${scriptId}`),
 
   generate: (episodeId: number, scriptId: number) =>
-    transport.post<ApiResponse<string>>(`/episodes/${episodeId}/scripts/${scriptId}/generate`),
+    transport.post<ApiResponse<string>>(`/episodes/${episodeId}/scripts/${scriptId}/generate`, getGenerationOptions()),
 }

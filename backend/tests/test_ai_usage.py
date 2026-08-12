@@ -18,6 +18,23 @@ def test_generation_requests_default_to_strict_backend_contract():
     assert GenerateNextChapterRequest().economy_mode is False
 
 
+def test_free_generation_contract_defaults_to_deepseek():
+    request = GenerateChapterRequest(free_mode=True)
+    assert request.free_mode is True
+    assert request.free_provider == "deepseek"
+
+
+def test_web_ai_config_uses_local_adapter(monkeypatch):
+    from app.config import settings
+    from app.services.ai_service import ai_service
+
+    monkeypatch.setattr(settings, "MINITEXT_WEB_AI_URL", "http://127.0.0.1:4999/")
+    config = ai_service.web_config("chatgpt")
+    assert config.base_url == "http://127.0.0.1:4999/v1"
+    assert config.model == "chatgpt"
+    assert config.input_price_cny == 0
+
+
 def test_usage_tracker_persists_tokens_and_estimated_cost(tmp_path, monkeypatch):
     monkeypatch.setenv("MINITEXT_DATA_DIR", str(tmp_path))
     tracker = AIUsageService()

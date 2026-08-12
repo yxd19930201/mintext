@@ -5,9 +5,11 @@ Falls back to settings (env vars) when no explicit config is provided.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 import asyncio
+from types import SimpleNamespace
 import httpx
 from fastapi import HTTPException, status
 from app.config import settings
@@ -17,6 +19,58 @@ from app.services.novel_skill_service import novel_skill_prompt
 from app.services.ai_usage_service import ai_usage_service
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_chapter_paragraphs(content: str) -> str:
+    """Preserve authored paragraphs and repair long prose flattened to one line."""
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return text
+
+    # Existing paragraph structure is authoritative; only tidy excessive gaps.
+    if "\n" in text:
+        lines = [line.strip() for line in text.split("\n")]
+        paragraphs: list[str] = []
+        current: list[str] = []
+        for line in lines:
+            if line:
+                current.append(line)
+            elif current:
+                paragraphs.append("\n".join(current))
+                current = []
+        if current:
+            paragraphs.append("\n".join(current))
+        return "\n\n".join(paragraphs)
+
+    # Short strings are usually titles, summaries, or dialogue snippets rather
+    # than full chapter prose and should not be reformatted.
+    if len(text) < 500:
+        return text
+
+    sentences = [
+        match.group(0).strip()
+        for match in re.finditer(r".*?(?:[。！？!?]+[”’」』\"]*|$)", text)
+        if match.group(0).strip()
+    ]
+    if len(sentences) < 4:
+        return text
+
+    paragraphs: list[str] = []
+    current = ""
+    for sentence in sentences:
+        starts_dialogue = sentence.startswith(("“", '"'))
+        if current and starts_dialogue and len(current) >= 90:
+            paragraphs.append(current.strip())
+            current = ""
+        current += sentence
+        ends_dialogue = sentence.endswith(("”", '"'))
+        if len(current) >= 220 or (ends_dialogue and len(current) >= 100):
+            paragraphs.append(current.strip())
+            current = ""
+    if current.strip():
+        paragraphs.append(current.strip())
+
+    return "\n\n".join(paragraphs) if len(paragraphs) > 1 else text
 
 
 def _audit_focus_rules(payload: dict) -> str:
@@ -76,6 +130,22 @@ class AIService:
         self._pricing: dict[tuple[str, str], tuple[float, float]] = {}
 
     @staticmethod
+    def web_config(provider: str):
+        if provider not in {"deepseek", "chatgpt"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="WEB_AI_PROVIDER_INVALID:免费模式仅支持 DeepSeek 或 ChatGPT 网页版。",
+            )
+        return SimpleNamespace(
+            name=f"{provider} 网页版",
+            base_url=settings.MINITEXT_WEB_AI_URL.rstrip("/") + "/v1",
+            api_key="web-login",
+            model=provider,
+            input_price_cny=0,
+            output_price_cny=0,
+        )
+
+    @staticmethod
     def _transport_error_detail(exc: Exception) -> str:
         error_name = type(exc).__name__
         if isinstance(exc, httpx.ReadTimeout):
@@ -104,6 +174,134 @@ class AIService:
         message = str(exc).strip() or repr(exc)
         return f"AI_CALL_FAILED:{error_name}: {message}"
 
+    async def _call_web_adapter(
+        self,
+        messages: list[dict],
+        base_url: str,
+        api_key: str,
+        model: str,
+        json_mode: bool,
+    ) -> str:
+        """Use the durable browser task endpoint for every free-web AI call."""
+        instruction = "\n\n".join(
+            f"[{str(message.get('role', 'user')).upper()}]\n{message.get('content', '')}"
+            for message in messages
+        )
+        if json_mode:
+            output_schema = {"type": "object", "additionalProperties": True}
+        else:
+            output_schema = {
+                "type": "object",
+                "properties": {"content": {"type": "string"}},
+                "required": ["content"],
+                "additionalProperties": False,
+            }
+            instruction += "\n\n请把最终正文或剧本完整放入 content 字段，保留自然段换行。"
+        fingerprint = hashlib.sha256(
+            f"{model}\0{json_mode}\0{instruction}".encode("utf-8")
+        ).hexdigest()
+        payload = {
+            "requestId": f"ai-{fingerprint[:40]}",
+            "idempotencyKey": f"ai-{fingerprint}",
+            "provider": model,
+            "input": {},
+            "taskType": "json_transform" if json_mode else "custom",
+            "instruction": instruction,
+            "outputSchema": output_schema,
+            "mode": "fast" if model == "deepseek" else "current",
+            "cleanup": "none",
+            "timeoutMs": 720_000,
+            "maxAttempts": 2,
+        }
+        timeout = httpx.Timeout(connect=20.0, read=780.0, write=90.0, pool=20.0)
+        try:
+            body = await self._post_web_task(base_url, api_key, payload, timeout)
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"WEB_AI_ADAPTER_ERROR:HTTP {exc.response.status_code}: {exc.response.text[:800]}",
+            )
+        if not body.get("success") or not isinstance(body.get("data"), dict):
+            error = body.get("error") or {}
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"WEB_AI_FAILED:{error.get('code', 'UNKNOWN')}:{error.get('message', '网页版 AI 生成失败')}",
+            )
+        data = body["data"]
+        if json_mode:
+            return json.dumps(data, ensure_ascii=False)
+        content = data.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="WEB_AI_EMPTY_CONTENT:网页版 AI 未返回正文")
+        return content.strip()
+
+    async def _post_web_task(
+        self,
+        base_url: str,
+        api_key: str,
+        payload: dict,
+        timeout: httpx.Timeout,
+    ) -> dict:
+        """Submit once; if the socket drops, reclaim the same durable result.
+
+        The status endpoint never starts a model generation. This makes a
+        ReadError safe to recover from without repeating the browser prompt or
+        incurring a second generation cost.
+        """
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        root = base_url.rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(root + "/generate", json=payload, headers=headers)
+                response.raise_for_status()
+                return response.json()
+        except httpx.TransportError as exc:
+            logger.warning(
+                "Web AI response connection interrupted; reclaiming idempotent result key=%s error=%s",
+                payload.get("idempotencyKey"),
+                type(exc).__name__,
+            )
+
+        deadline = asyncio.get_running_loop().time() + min(
+            840.0,
+            max(90.0, float(payload.get("timeoutMs") or 720_000) / 1000 + 60),
+        )
+        missing_checks = 0
+        last_error: Exception | None = None
+        status_timeout = httpx.Timeout(connect=10.0, read=20.0, write=20.0, pool=10.0)
+        while asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(2 if missing_checks < 3 else 5)
+            try:
+                async with httpx.AsyncClient(timeout=status_timeout) as client:
+                    response = await client.post(root + "/generate/status", json=payload, headers=headers)
+                    response.raise_for_status()
+                    state = response.json()
+                if state.get("status") == "completed" and isinstance(state.get("response"), dict):
+                    logger.info("Reclaimed completed web AI result key=%s", payload.get("idempotencyKey"))
+                    return state["response"]
+                if state.get("status") == "running":
+                    missing_checks = 0
+                    continue
+                missing_checks += 1
+                if missing_checks >= 3:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=(
+                            "WEB_AI_RESULT_NOT_FOUND:网页生成连接中断，适配器中也未找到正在运行或已缓存的任务。"
+                            "为避免重复生成，本次没有重新提交；已保存的检查点不会丢失。"
+                        ),
+                    )
+            except HTTPException:
+                raise
+            except (httpx.TransportError, httpx.HTTPStatusError, ValueError) as exc:
+                last_error = exc
+                continue
+        detail = self._transport_error_detail(last_error or RuntimeError("result reclaim timed out"))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"WEB_AI_RESULT_RECLAIM_TIMEOUT:{detail}",
+        )
+
     async def _call(
         self,
         messages: list[dict],
@@ -113,6 +311,8 @@ class AIService:
         json_mode: bool = False,
         max_tokens: int | None = None,
     ) -> str:
+        if base_url.startswith(("http://127.0.0.1:", "http://localhost:")):
+            return await self._call_web_adapter(messages, base_url, api_key, model, json_mode)
         url = base_url.rstrip("/") + "/chat/completions"
         payload = {"model": model, "messages": messages}
         # DeepSeek V4 defaults to thinking mode. For this application the
@@ -250,6 +450,68 @@ class AIService:
                 detail="AI_CONFIG_REQUIRED:此功能需要使用 AI 模型。请先进入“设置 → AI 模型配置”，添加接口地址、API Key 和模型名，并设为默认配置。",
             )
         return settings.AI_BASE_URL, settings.AI_API_KEY, settings.AI_MODEL
+
+    async def analyze_structured_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        ai_config: AIConfig | None = None,
+        max_tokens: int = 6000,
+    ) -> dict:
+        """Run one bounded structured analysis for assistant-side reports."""
+        base_url, api_key, model = self._resolve(ai_config)
+        # The local browser adapter has a durable /generate endpoint. Use it
+        # for long manuscript inspections so the browser can keep waiting past
+        # the normal API timeout, persist the completed answer, and return the
+        # same result after a desktop/network interruption instead of starting
+        # another costly generation.
+        if base_url.startswith(("http://127.0.0.1:", "http://localhost:")):
+            fingerprint = hashlib.sha256(
+                f"{model}\0{system_prompt}\0{user_prompt}".encode("utf-8")
+            ).hexdigest()
+            payload = {
+                "requestId": f"manuscript-{fingerprint[:40]}",
+                "idempotencyKey": f"manuscript-{fingerprint}",
+                "provider": model,
+                "input": {},
+                "taskType": "quality_review",
+                "instruction": f"{system_prompt}\n\n{user_prompt}",
+                "outputSchema": {"type": "object", "additionalProperties": True},
+                "mode": "fast" if model == "deepseek" else "current",
+                "cleanup": "none",
+                "timeoutMs": 720_000,
+                "maxAttempts": 2,
+            }
+            timeout = httpx.Timeout(connect=20.0, read=780.0, write=90.0, pool=20.0)
+            try:
+                body = await self._post_web_task(base_url, api_key, payload, timeout)
+            except httpx.HTTPStatusError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"WEB_AI_ADAPTER_ERROR:HTTP {exc.response.status_code}: {exc.response.text[:800]}",
+                )
+            if not body.get("success") or not isinstance(body.get("data"), dict):
+                error = body.get("error") or {}
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=(
+                        f"WEB_AI_INSPECTION_FAILED:{error.get('code', 'UNKNOWN')}:"
+                        f"{error.get('message', '网页版 AI 未返回完整体检报告')}"
+                    ),
+                )
+            return body["data"]
+        raw = await self._call(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            base_url,
+            api_key,
+            model,
+            json_mode=True,
+            max_tokens=max_tokens,
+        )
+        return self._parse_json_response(raw, "manuscript inspection")
 
     async def generate_outline(
         self,

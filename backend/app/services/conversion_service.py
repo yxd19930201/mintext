@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 from app.repositories.ai_config_repo import AIConfigRepository
 from app.services.ai_service import ai_service
+from app.services.generation_mode_service import resolve_generation_config
 from app.services.creative_prompt_service import creative_prompt, normalize_short_script
 from app.schemas.conversion import (
     NovelToScriptRequest,
@@ -22,13 +23,9 @@ class ConversionService:
     async def novel_to_script(self, req: NovelToScriptRequest, owner_id: int) -> NovelToScriptResult:
         """Convert novel text to short drama script"""
         # Get AI config
-        ai_config = None
-        if req.ai_config_id:
-            ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
-        else:
-            ai_config = await self.ai_config_repo.get_default()
+        ai_config = await resolve_generation_config(
+            self.ai_config_repo, req, explicit_config_id=req.ai_config_id,
+        )
 
         # Build system prompt
         sys_msg = creative_prompt("novel_to_short", req.system_prompt)
@@ -99,13 +96,9 @@ class ConversionService:
     async def script_to_video(self, req: ScriptToVideoRequest, owner_id: int) -> ScriptToVideoResult:
         """Convert script to Seedance 2.0 video generation format"""
         # Get AI config
-        ai_config = None
-        if req.ai_config_id:
-            ai_config = await self.ai_config_repo.get(req.ai_config_id)
-            if not ai_config:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI config not found")
-        else:
-            ai_config = await self.ai_config_repo.get_default()
+        ai_config = await resolve_generation_config(
+            self.ai_config_repo, req, explicit_config_id=req.ai_config_id,
+        )
 
         # Build system prompt
         sys_msg = creative_prompt("storyboard", req.system_prompt)

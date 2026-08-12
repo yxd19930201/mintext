@@ -1,7 +1,6 @@
 import { transport } from './index'
 import type { ApiResponse, NovelOutlineResult } from '../../types/models'
-
-const economyMode = () => localStorage.getItem('mintext:generationMode') !== 'strict'
+import { getGenerationOptions } from '../generationMode'
 
 export interface GenerateChapterResult {
   chapter_id: number
@@ -96,7 +95,7 @@ export const novelAiApi = {
   }) =>
     transport.post<ApiResponse<NovelOutlineResult>>('/novel-ai/generate/outline', {
       ...data,
-      economy_mode: economyMode(),
+      ...getGenerationOptions(),
     }),
 
   generateChapter: (chapterId: number, data: {
@@ -108,7 +107,7 @@ export const novelAiApi = {
   }) =>
     transport.post<ApiResponse<GenerateChapterResult>>(`/novel-ai/generate/chapter/${chapterId}`, {
       ...data,
-      economy_mode: economyMode(),
+      ...getGenerationOptions(),
     }),
 
   batchGenerate: (novelId: number, data: {
@@ -118,7 +117,7 @@ export const novelAiApi = {
   }) =>
     transport.post<ApiResponse<BatchGenerateResult>>(`/novel-ai/generate/batch/${novelId}`, {
       ...data,
-      economy_mode: economyMode(),
+      ...getGenerationOptions(),
     }),
 
   generateNext: (novelId: number, data: {
@@ -127,7 +126,7 @@ export const novelAiApi = {
   }) =>
     transport.post<ApiResponse<GenerateNextChapterResult>>(`/novel-ai/generate/next/${novelId}`, {
       ...data,
-      economy_mode: economyMode(),
+      ...getGenerationOptions(),
     }),
 
   getChaptersWithContent: (novelId: number) =>
@@ -137,13 +136,13 @@ export const novelAiApi = {
     transport.post<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/${novelId}/clear`),
 
   updateGraphFromChapter: (novelId: number, chapterId: number) =>
-    transport.post<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/update-chapter/${novelId}/${chapterId}`),
+    transport.post<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/update-chapter/${novelId}/${chapterId}`, getGenerationOptions()),
 
   getGraph: (novelId: number) =>
     transport.get<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/${novelId}`),
 
   rebuildGraph: (novelId: number) =>
-    transport.post<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/rebuild/${novelId}`),
+    transport.post<ApiResponse<KnowledgeGraph>>(`/novel-ai/graph/rebuild/${novelId}`, getGenerationOptions()),
 
   getArchive: (novelId: number) =>
     transport.get<ApiResponse<CanonArchive>>(`/novel-ai/archive/${novelId}`),

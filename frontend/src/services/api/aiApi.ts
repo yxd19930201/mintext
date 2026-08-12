@@ -1,5 +1,6 @@
 import { transport } from './index'
 import type { ApiResponse, AIConfig, AIPromptPreset, OutlineResult } from '../../types/models'
+import { getGenerationOptions } from '../generationMode'
 
 export const aiApi = {
   // Configs
@@ -49,20 +50,20 @@ export const aiApi = {
 
   // Generate
   generateOutline: (projectId: number, overrides?: { total_episodes?: number; ai_config_id?: number; system_prompt?: string }) =>
-    transport.post<ApiResponse<OutlineResult>>('/ai/generate/outline', { project_id: projectId, ...overrides }),
+    transport.post<ApiResponse<OutlineResult>>('/ai/generate/outline', { project_id: projectId, ...overrides, ...getGenerationOptions() }),
 
   generateScript: (episodeId: number, data?: { extra_context?: string; ai_config_id?: number; system_prompt?: string }) =>
-    transport.post<ApiResponse<{ episode_id: number; script_id: number; content: string }>>(`/ai/generate/script/${episodeId}`, data ?? {}),
+    transport.post<ApiResponse<{ episode_id: number; script_id: number; content: string }>>(`/ai/generate/script/${episodeId}`, { ...(data ?? {}), ...getGenerationOptions() }),
 
   batchGenerate: (projectId: number, overrides?: { ai_config_id?: number; system_prompt?: string; only_missing?: boolean }) =>
     transport.post<ApiResponse<{ total: number; succeeded: number; failed: number; errors: { episode_id: number; error: string }[] }>>(
       `/ai/generate/batch/${projectId}`,
-      overrides ?? {}
+      { ...(overrides ?? {}), ...getGenerationOptions() }
     ),
 
   generateNextEpisode: (projectId: number, overrides?: { ai_config_id?: number; system_prompt?: string }) =>
     transport.post<ApiResponse<{ episode_id: number; episode_number: number; title: string; synopsis: string; script_id: number }>>(
       `/ai/generate/next/${projectId}`,
-      overrides ?? {}
+      { ...(overrides ?? {}), ...getGenerationOptions() }
     ),
 }

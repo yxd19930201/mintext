@@ -1,28 +1,29 @@
 from typing import Optional
 from pydantic import BaseModel
+from app.schemas.generation_mode import GenerationModeOptions
 
 
-class GenerateOutlineRequest(BaseModel):
+class GenerateOutlineRequest(GenerationModeOptions):
     project_id: int
     total_episodes: int = 10
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
 
 
-class GenerateScriptRequest(BaseModel):
+class GenerateScriptRequest(GenerationModeOptions):
     extra_context: Optional[str] = None
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
 
 
-class BatchGenerateRequest(BaseModel):
+class BatchGenerateRequest(GenerationModeOptions):
     project_id: Optional[int] = None
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
     only_missing: bool = False
 
 
-class GenerateNextEpisodeRequest(BaseModel):
+class GenerateNextEpisodeRequest(GenerationModeOptions):
     project_id: Optional[int] = None
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None

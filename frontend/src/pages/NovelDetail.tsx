@@ -39,21 +39,27 @@ export default function NovelDetail() {
   }, [novelId, fetchNovel, fetchChapters])
 
   useEffect(() => {
-    if (currentNovel?.outline) {
-      try {
-        const parsed = JSON.parse(currentNovel.outline)
-        setOutline(parsed.chapters || [])
-      } catch (e) {
-        console.error('Failed to parse outline', e)
-      }
+    if (!novelId || currentNovel?.id !== Number(novelId)) return
+    if (!currentNovel.outline) {
+      setOutline([])
+      return
     }
-  }, [currentNovel])
+    try {
+      const parsed = JSON.parse(currentNovel.outline)
+      setOutline(Array.isArray(parsed.chapters) ? parsed.chapters : [])
+    } catch (e) {
+      console.error('Failed to parse outline', e)
+      setOutline([])
+    }
+  }, [currentNovel, novelId])
 
   useEffect(() => {
-    if (currentNovel?.total_chapters) {
+    if (currentNovel?.id === Number(novelId) && currentNovel.total_chapters) {
       setTotalChapters(currentNovel.total_chapters)
+    } else if (currentNovel?.id === Number(novelId)) {
+      setTotalChapters(50)
     }
-  }, [currentNovel?.total_chapters])
+  }, [currentNovel?.id, currentNovel?.total_chapters, novelId])
 
   const [generatingProgress, setGeneratingProgress] = usePersistentState<{ done: number; total: number } | null>(`novel:${novelId}:generatingProgress`, null)
 
@@ -140,6 +146,17 @@ export default function NovelDetail() {
           }
           accumulated = Array.from(merged.values())
             .sort((a, b) => a.chapter_number - b.chapter_number)
+        }
+        const missingFromBatch = Array.from(
+          { length: end - start + 1 },
+          (_, index) => start + index,
+        ).filter(chapterNumber => !accumulated.some(
+          item => item.chapter_number === chapterNumber,
+        ))
+        if (missingFromBatch.length > 0) {
+          throw new Error(
+            `第 ${start}-${end} 章返回不完整，缺少第 ${missingFromBatch.join('、')} 章，本批未计入进度。`,
+          )
         }
         setOutline([...accumulated])
         generatedCount += end - start + 1
@@ -251,23 +268,33 @@ export default function NovelDetail() {
   const handleSyncToChapters = async () => {
     if (!novelId || outline.length === 0) return
     setSyncingAll(true)
-    setSyncProgress({ done: 0, total: outline.length })
     try {
+      const novelRes = await novelApi.get(Number(novelId))
+      let authoritativeOutline = outline
+      try {
+        const parsed = JSON.parse(novelRes.data?.outline || '{}')
+        if (Array.isArray(parsed.chapters)) authoritativeOutline = parsed.chapters
+      } catch {
+        // Retain the rendered outline only for malformed legacy JSON.
+      }
+      if (authoritativeOutline.length === 0) return
+      setOutline(authoritativeOutline)
+      setSyncProgress({ done: 0, total: authoritativeOutline.length })
       // 先拉取最新完整章节列表
       const latestRes = await chapterApi.list(Number(novelId))
       const latestChapters = latestRes.data || []
 
       // 删除大纲之外的多余章节
       for (const ch of latestChapters) {
-        const inOutline = outline.find(o => o.chapter_number === ch.chapter_number)
+        const inOutline = authoritativeOutline.find(o => o.chapter_number === ch.chapter_number)
         if (!inOutline) {
           await chapterApi.delete(Number(novelId), ch.id)
         }
       }
 
       // 按大纲逐章 upsert
-      for (let index = 0; index < outline.length; index++) {
-        const item = outline[index]
+      for (let index = 0; index < authoritativeOutline.length; index++) {
+        const item = authoritativeOutline[index]
         const existing = latestChapters.find(c => c.chapter_number === item.chapter_number)
         if (existing) {
           await chapterApi.update(Number(novelId), existing.id, { title: item.title, synopsis: item.synopsis })
@@ -278,7 +305,7 @@ export default function NovelDetail() {
             synopsis: item.synopsis,
           })
         }
-        setSyncProgress({ done: index + 1, total: outline.length })
+        setSyncProgress({ done: index + 1, total: authoritativeOutline.length })
       }
 
       await fetchChapters(Number(novelId))
@@ -466,7 +493,7 @@ export default function NovelDetail() {
             </button>
           )}
           {outline.length > 0 && (
-            <button className="btn" onClick={handleSyncToChapters} disabled={syncingAll}>
+            <button className="btn" onClick={handleSyncToChapters} disabled={syncingAll || generating}>
               {syncingAll && syncProgress
                 ? `同步中 ${syncProgress.done}/${syncProgress.total}...`
                 : `同步全部章节 (${outline.length} 章)`}

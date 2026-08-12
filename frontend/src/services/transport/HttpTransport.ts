@@ -62,8 +62,26 @@ export class HttpTransport implements ITransport {
 
 declare global {
   interface Window {
-    minitextDesktop?: { serverUrl: string; platform: string }
+    minitextDesktop?: {
+      serverUrl: string
+      platform: string
+      webAi: {
+        status: () => Promise<{ providers: WebAiProviderStatus[] }>
+        probe: (provider: string) => Promise<WebAiProviderStatus>
+        login: (provider: string) => Promise<WebAiProviderStatus>
+      }
+    }
   }
+}
+
+export interface WebAiProviderStatus {
+  id: string
+  label: string
+  state?: string
+  ready?: boolean
+  running?: boolean
+  queued?: number
+  reason?: string
 }
 
 function getApiBaseUrl(): string {

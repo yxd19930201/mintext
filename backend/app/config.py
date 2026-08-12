@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     AI_BASE_URL: str = "https://api.openai.com/v1"
     AI_API_KEY: str = ""
     AI_MODEL: str = "gpt-4o"
+    MINITEXT_WEB_AI_URL: str = "http://127.0.0.1:4310"
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

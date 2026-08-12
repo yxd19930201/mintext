@@ -10,6 +10,6 @@ try {
         --hidden-import app.models.episode --hidden-import app.models.script `
         --hidden-import app.models.novel --hidden-import app.models.chapter `
         --hidden-import app.models.chapter_content --hidden-import app.models.ai_config `
-        --hidden-import app.models.ai_prompt_preset server.py
+        --hidden-import app.models.ai_prompt_preset --hidden-import app.models.manuscript_report server.py
     Write-Host "Server package: $Backend\dist\mintext-server.exe"
 } finally { Pop-Location }

@@ -1,8 +1,9 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from app.schemas.generation_mode import GenerationModeOptions
 
 
-class NovelToScriptRequest(BaseModel):
+class NovelToScriptRequest(GenerationModeOptions):
     novel_text: str = Field(..., min_length=1, max_length=50000)
     target_episodes: int = Field(default=5, ge=1, le=20)
     style: Optional[str] = Field(None, max_length=100)
@@ -10,7 +11,7 @@ class NovelToScriptRequest(BaseModel):
     system_prompt: Optional[str] = None
 
 
-class ScriptToVideoRequest(BaseModel):
+class ScriptToVideoRequest(GenerationModeOptions):
     script_text: str = Field(..., min_length=1)
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None

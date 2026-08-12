@@ -44,6 +44,43 @@
         "to": "server/mintext-server.exe"
       },
       {
+        "from": "../web-ai-adapter",
+        "to": "web-ai-adapter",
+        "filter": ["package.json", "dist/**/*"]
+      },
+      {
+        "from": "../web-ai-adapter/node_modules/playwright",
+        "to": "web-ai-adapter/node_modules/playwright"
+      },
+      {
+        "from": "../web-ai-adapter/node_modules/playwright-core",
+        "to": "web-ai-adapter/node_modules/playwright-core"
+      },
+      {
+        "from": "../web-ai-adapter/node_modules/ajv",
+        "to": "web-ai-adapter/node_modules/ajv"
+      },
+      {
+        "from": "../web-ai-adapter/node_modules/jsonrepair",
+        "to": "web-ai-adapter/node_modules/jsonrepair"
+      },
+      {
+        "from": "../web-ai-adapter/node_modules/fast-deep-equal",
+        "to": "web-ai-adapter/node_modules/fast-deep-equal"
+      },
+      {
+        "from": "../web-ai-adapter/node_modules/fast-uri",
+        "to": "web-ai-adapter/node_modules/fast-uri"
+      },
+      {
+        "from": "../web-ai-adapter/node_modules/json-schema-traverse",
+        "to": "web-ai-adapter/node_modules/json-schema-traverse"
+      },
+      {
+        "from": "../web-ai-adapter/node_modules/require-from-string",
+        "to": "web-ai-adapter/node_modules/require-from-string"
+      },
+      {
         "from": "build/icon.png",
         "to": "icon.png"
       },

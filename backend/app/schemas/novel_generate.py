@@ -1,12 +1,13 @@
 import json
 import re
-from typing import Any, Optional, List
+from typing import Any, Literal, Optional, List
 
 from pydantic import BaseModel, Field, field_validator
+from app.schemas.generation_mode import GenerationModeOptions
 
 
 # Request schemas
-class GenerateNovelOutlineRequest(BaseModel):
+class GenerateNovelOutlineRequest(GenerationModeOptions):
     novel_id: int
     total_chapters: int = Field(..., ge=1, le=200)
     start_chapter: int = Field(1, ge=1)
@@ -14,29 +15,25 @@ class GenerateNovelOutlineRequest(BaseModel):
     theme: Optional[str] = None        # pass back theme from first batch
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
-    economy_mode: bool = False
 
 
-class GenerateChapterRequest(BaseModel):
+class GenerateChapterRequest(GenerationModeOptions):
     extra_context: Optional[str] = None
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
-    economy_mode: bool = False
     regenerate: bool = False
     restart_failed_generation: bool = False
 
 
-class BatchGenerateChaptersRequest(BaseModel):
+class BatchGenerateChaptersRequest(GenerationModeOptions):
     only_missing: bool = False
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
-    economy_mode: bool = False
 
 
-class GenerateNextChapterRequest(BaseModel):
+class GenerateNextChapterRequest(GenerationModeOptions):
     ai_config_id: Optional[int] = None
     system_prompt: Optional[str] = None
-    economy_mode: bool = False
 
 
 # Response schemas

@@ -1,5 +1,6 @@
 import { transport } from './index'
 import type { ApiResponse, NovelToScriptResult, ScriptToVideoResult } from '../../types/models'
+import { getGenerationOptions } from '../generationMode'
 
 export const conversionApi = {
   novelToScript: (data: {
@@ -9,12 +10,12 @@ export const conversionApi = {
     ai_config_id?: number
     system_prompt?: string
   }) =>
-    transport.post<ApiResponse<NovelToScriptResult>>('/conversion/novel-to-script', data),
+    transport.post<ApiResponse<NovelToScriptResult>>('/conversion/novel-to-script', { ...data, ...getGenerationOptions() }),
 
   scriptToVideo: (data: {
     script_text: string
     ai_config_id?: number
     system_prompt?: string
   }) =>
-    transport.post<ApiResponse<ScriptToVideoResult>>('/conversion/script-to-video', data),
+    transport.post<ApiResponse<ScriptToVideoResult>>('/conversion/script-to-video', { ...data, ...getGenerationOptions() }),
 }

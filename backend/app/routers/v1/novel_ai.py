@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from app.schemas.novel_generate import (
     GenerateNextChapterResult,
 )
 from app.schemas.common import ApiResponse
+from app.schemas.generation_mode import GenerationModeOptions
 
 router = APIRouter()
 
@@ -74,10 +75,13 @@ async def generate_next_chapter(
 async def update_graph_from_chapter(
     novel_id: int,
     chapter_id: int,
+    options: GenerationModeOptions = Body(default_factory=GenerationModeOptions),
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
 ):
-    result = await KnowledgeGraphService(db).update_graph_from_chapter(novel_id, chapter_id, user_id)
+    result = await KnowledgeGraphService(db).update_graph_from_chapter(
+        novel_id, chapter_id, user_id, options,
+    )
     return ApiResponse(data=result)
 
 
@@ -138,8 +142,9 @@ async def update_canon_archive_section(
 @router.post("/graph/rebuild/{novel_id}", response_model=ApiResponse[dict])
 async def rebuild_knowledge_graph(
     novel_id: int,
+    options: GenerationModeOptions = Body(default_factory=GenerationModeOptions),
     db: AsyncSession = Depends(get_db),
     user_id: int = Depends(get_current_user_id),
 ):
-    result = await KnowledgeGraphService(db).rebuild_graph(novel_id, user_id)
+    result = await KnowledgeGraphService(db).rebuild_graph(novel_id, user_id, options)
     return ApiResponse(data=result)

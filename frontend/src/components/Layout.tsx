@@ -55,6 +55,7 @@ export default function Layout() {
   else if (location.pathname.includes('/chapters/')) crumbs.push('小说', '章节', '章节编辑器')
   else if (location.pathname.includes('/novels/')) crumbs.push('小说', '章节列表')
   else if (location.pathname === '/conversion') crumbs.push('小说转短剧')
+  else if (location.pathname === '/ai') crumbs.push('AI 助手', '小说体检')
 
   return (
     <div className="ios-shell">
@@ -96,7 +97,7 @@ export default function Layout() {
               <path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/><circle cx="18" cy="6" r="3"/>
             </svg>
             AI 助手
-            <span className="ios-nav-badge">预留</span>
+            <span className="ios-nav-badge">新</span>
           </NavLink>
           <NavLink
             to="/settings"

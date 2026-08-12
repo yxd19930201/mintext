@@ -7,6 +7,7 @@ type StoredValue = unknown
 interface PersistentTaskState {
   values: Record<string, StoredValue>
   setValue: (key: string, value: StoredValue) => void
+  clearPrefix: (prefix: string) => void
 }
 
 const usePersistentTaskStore = create<PersistentTaskState>((set) => ({
@@ -14,7 +15,16 @@ const usePersistentTaskStore = create<PersistentTaskState>((set) => ({
   setValue: (key, value) => set(state => ({
     values: { ...state.values, [key]: value },
   })),
+  clearPrefix: (prefix) => set(state => ({
+    values: Object.fromEntries(
+      Object.entries(state.values).filter(([key]) => !key.startsWith(prefix)),
+    ),
+  })),
 }))
+
+export function clearPersistentTaskPrefix(prefix: string) {
+  usePersistentTaskStore.getState().clearPrefix(prefix)
+}
 
 export function usePersistentTaskValues() {
   return usePersistentTaskStore(state => state.values)

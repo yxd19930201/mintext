@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { aiApi } from '../services/api/aiApi'
+import { webAi, type FreeProvider } from '../services/webAi'
+import type { WebAiProviderStatus } from '../services/transport/HttpTransport'
 import type { AIConfig } from '../types/models'
 
 const emptyConfig = {
@@ -23,11 +25,60 @@ export default function Settings() {
     localStorage.getItem('mintext:generationMode') || 'economy',
   )
   const [usage, setUsage] = useState<any>(null)
+  const [freeProvider, setFreeProvider] = useState<FreeProvider>(
+    (localStorage.getItem('mintext:freeProvider') as FreeProvider) || 'deepseek',
+  )
+  const [webStatuses, setWebStatuses] = useState<Record<string, WebAiProviderStatus>>({})
+  const [webAiBusy, setWebAiBusy] = useState<string | null>(null)
+  const [webAiError, setWebAiError] = useState('')
+  const webAiActionLock = useRef<string | null>(null)
 
   useEffect(() => {
     aiApi.listConfigs().then(r => setConfigs(r.data ?? []))
     aiApi.getUsage().then(r => setUsage(r.data))
+    webAi.status()
+      .then(r => setWebStatuses(Object.fromEntries(r.providers.map(item => [item.id, item]))))
+      .catch(error => setWebAiError(error instanceof Error ? error.message : String(error)))
   }, [])
+
+  const selectFreeProvider = (provider: FreeProvider) => {
+    setFreeProvider(provider)
+    localStorage.setItem('mintext:freeProvider', provider)
+  }
+
+  const updateWebStatus = (status: WebAiProviderStatus) => {
+    setWebStatuses(current => ({ ...current, [status.id]: status }))
+  }
+
+  const handleProbe = async (provider: FreeProvider) => {
+    if (webAiActionLock.current) return
+    webAiActionLock.current = `probe:${provider}`
+    setWebAiBusy(`probe:${provider}`)
+    setWebAiError('')
+    try {
+      updateWebStatus(await webAi.probe(provider))
+    } catch (error) {
+      setWebAiError(error instanceof Error ? error.message : String(error))
+    } finally {
+      webAiActionLock.current = null
+      setWebAiBusy(null)
+    }
+  }
+
+  const handleWebLogin = async (provider: FreeProvider) => {
+    if (webAiActionLock.current) return
+    webAiActionLock.current = `login:${provider}`
+    setWebAiBusy(`login:${provider}`)
+    setWebAiError('')
+    try {
+      updateWebStatus(await webAi.login(provider))
+    } catch (error) {
+      setWebAiError(error instanceof Error ? error.message : String(error))
+    } finally {
+      webAiActionLock.current = null
+      setWebAiBusy(null)
+    }
+  }
 
   // --- Config handlers ---
   const handleSaveConfig = async (e: React.FormEvent) => {
@@ -90,16 +141,63 @@ export default function Settings() {
           >
             标准
           </button>
+          <button
+            className={`btn ${generationMode === 'free' ? 'btn-primary' : ''}`}
+            onClick={() => {
+              setGenerationMode('free')
+              localStorage.setItem('mintext:generationMode', 'free')
+            }}
+          >
+            免费
+          </button>
         </div>
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
           {generationMode === 'economy'
             ? '大纲每批调用1次，正文每章调用1次；不执行额外AI审核和自动返修，人物、资产及不可逆事实根据大纲状态在本地更新。速度更快、消耗更低，适合初稿和批量生成。'
-            : '大纲和正文生成后都会执行AI一致性审核；发现冲突时自动返修并重新审核，正文通过后再由AI提取人物、资产及不可逆事实。连续性更严格，适合重要长篇和定稿。'}
+            : generationMode === 'strict'
+              ? '大纲和正文生成后都会执行AI一致性审核；发现冲突时自动返修并重新审核，正文通过后再由AI提取人物、资产及不可逆事实。连续性更严格，适合重要长篇和定稿。'
+              : '正文生成及其必要的审核、返修和连续性提取均通过已登录的 DeepSeek 或 ChatGPT 网页完成，不使用下方 API Key。'}
           <div style={{ marginTop: 4, color: 'var(--text-3)' }}>
-            经济模式通常只产生基础生成调用；标准模式会增加审核、返修和账本提取调用，实际Token消耗取决于章节长度及返修次数。
+            {generationMode === 'free'
+              ? '首次使用请在下方选择网页渠道并完成登录；生成期间请勿关闭由 Mintext 打开的浏览器窗口。'
+              : '经济模式通常只产生基础生成调用；标准模式会增加审核、返修和账本提取调用，实际Token消耗取决于章节长度及返修次数。'}
           </div>
         </div>
       </div>
+
+      {generationMode === 'free' && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div style={{ fontWeight: 600 }}>免费网页渠道</div>
+          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-2)' }}>
+            选择生成正文时使用的网站。登录状态仅保存在本机 Mintext 数据目录中。
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
+            {(['deepseek', 'chatgpt'] as FreeProvider[]).map(provider => {
+              const status = webStatuses[provider]
+              const selected = freeProvider === provider
+              const ready = status?.ready
+              return (
+                <div key={provider} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12, border: `1px solid ${selected ? 'var(--primary)' : 'var(--border)'}`, borderRadius: 10 }}>
+                  <input type="radio" checked={selected} onChange={() => selectFreeProvider(provider)} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600 }}>{provider === 'deepseek' ? 'DeepSeek 网页版' : 'ChatGPT 网页版'}</div>
+                    <div style={{ marginTop: 2, fontSize: 12, color: ready ? 'var(--primary)' : 'var(--text-3)' }}>
+                      {ready ? '已登录，可以生成正文' : status?.reason || '尚未检测登录状态'}
+                    </div>
+                  </div>
+                  <button className="btn btn-ghost" disabled={webAiBusy !== null} onClick={() => handleProbe(provider)}>
+                    {webAiBusy === `probe:${provider}` ? '检测中…' : '检测'}
+                  </button>
+                  <button className="btn btn-primary" disabled={webAiBusy !== null} onClick={() => handleWebLogin(provider)}>
+                    {webAiBusy === `login:${provider}` ? '等待登录…' : ready ? '重新登录' : '登录'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+          {webAiError && <div style={{ marginTop: 10, color: 'var(--danger)', fontSize: 12 }}>{webAiError}</div>}
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

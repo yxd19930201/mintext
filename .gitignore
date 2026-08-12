@@ -49,6 +49,11 @@ backend/dist/
 backend/build/
 frontend/release*/
 
+# Browser AI adapter runtime data
+web-ai-adapter/.profiles/
+web-ai-adapter/.runtime/
+web-ai-adapter/output/
+
 # Private license issuer (contains the signing private key)
 license-tools/
 

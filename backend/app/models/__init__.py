@@ -9,5 +9,6 @@ from app.models.script import Script
 from app.models.novel import Novel
 from app.models.chapter import Chapter
 from app.models.chapter_content import ChapterContent
+from app.models.manuscript_report import ManuscriptReport
 
-__all__ = ["Base", "TimestampMixin", "User", "AIConfig", "AIPromptPreset", "Project", "Character", "Episode", "Script", "Novel", "Chapter", "ChapterContent"]
+__all__ = ["Base", "TimestampMixin", "User", "AIConfig", "AIPromptPreset", "Project", "Character", "Episode", "Script", "Novel", "Chapter", "ChapterContent", "ManuscriptReport"]
