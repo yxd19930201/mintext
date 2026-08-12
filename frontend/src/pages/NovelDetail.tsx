@@ -62,6 +62,15 @@ export default function NovelDetail() {
   }, [currentNovel?.id, currentNovel?.total_chapters, novelId])
 
   const [generatingProgress, setGeneratingProgress] = usePersistentState<{ done: number; total: number } | null>(`novel:${novelId}:generatingProgress`, null)
+  const outlineChapterNumbers = new Set(
+    outline
+      .map(item => item.chapter_number)
+      .filter(chapterNumber => chapterNumber >= 1 && chapterNumber <= totalChapters),
+  )
+  const outlineComplete = totalChapters > 0 && Array.from(
+    { length: totalChapters },
+    (_, index) => index + 1,
+  ).every(chapterNumber => outlineChapterNumbers.has(chapterNumber))
 
   const handleGenerateOutline = async () => {
     if (!novelId || !currentNovel) return
@@ -473,14 +482,16 @@ export default function NovelDetail() {
               onChange={e => setTotalChapters(Math.min(200, Math.max(1, Number(e.target.value) || 1)))}
             />
           </div>
-          <button className="btn btn-primary" onClick={handleGenerateOutline} disabled={generating}>
+          <button className="btn btn-primary" onClick={handleGenerateOutline} disabled={generating || outlineComplete}>
             {generating
               ? generatingProgress
                 ? `生成、审核与返修中 ${generatingProgress.done}/${generatingProgress.total}...`
                 : '生成、审核与返修中...'
-              : outline.length > 0
-                ? '继续生成未完成大纲'
-                : 'AI 生成大纲'}
+              : outlineComplete
+                ? '全部大纲已完成'
+                : outline.length > 0
+                  ? '继续生成未完成大纲'
+                  : 'AI 生成大纲'}
           </button>
           {outline.length > 0 && (
             <button
