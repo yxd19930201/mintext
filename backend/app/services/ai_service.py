@@ -197,8 +197,11 @@ class AIService:
                 "additionalProperties": False,
             }
             instruction += "\n\n请把最终正文或剧本完整放入 content 字段，保留自然段换行。"
+        # Cache namespace v3 invalidates responses produced before browser
+        # recovery compared the prompt tail.  Those caches could contain a
+        # prose draft under an audit/revision request key.
         fingerprint = hashlib.sha256(
-            f"{model}\0{json_mode}\0{instruction}".encode("utf-8")
+            f"web-call-v3\0{model}\0{json_mode}\0{instruction}".encode("utf-8")
         ).hexdigest()
         payload = {
             "requestId": f"ai-{fingerprint[:40]}",
@@ -852,7 +855,9 @@ class AIService:
             f"未通过审核的问题：\n{json.dumps(issues, ensure_ascii=False)}\n\n"
             f"待返修正文：\n{original_content}\n\n"
             "请按每条 repair_instruction 完整重写本章。不得用一句解释掩盖冲突；"
-            "必须在情节中建立充分因果。只输出修订后的小说正文。"
+            "必须在情节中建立充分因果。若问题包含 length/字数，修订后的正文必须控制在"
+            "4500—5500字，硬性范围4200—6200字，删除重复回顾与同义复述但保留关键行动和证据。"
+            "只输出修订后的小说正文，不得附带修改说明或字数说明。"
         )
         return await self._call(
             [{"role": "system", "content": system}, {"role": "user", "content": user}],

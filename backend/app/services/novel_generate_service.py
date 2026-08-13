@@ -138,6 +138,17 @@ def _json_value(raw: str | None, default):
         return default
 
 
+def _normalize_chapter_generation_mode(
+    regenerate: bool,
+    restart_failed_generation: bool,
+    has_formal_content: bool,
+) -> tuple[bool, bool]:
+    """Resolve stale-editor flags without confusing a candidate with saved prose."""
+    if restart_failed_generation and not has_formal_content:
+        return False, True
+    return regenerate, restart_failed_generation
+
+
 def _audit_entry(
     kind: str,
     chapter_range: str,
@@ -1700,7 +1711,19 @@ class NovelGenerateService:
 
         existing_content = await self.content_repo.get_latest(chapter_id)
         existing_text = getattr(existing_content, "content", "")
-        if isinstance(existing_text, str) and existing_text.strip() and not req.regenerate:
+        has_formal_content = isinstance(existing_text, str) and bool(existing_text.strip())
+
+        # Older frontends inferred ``regenerate`` solely from a non-empty
+        # editor.  After a rejected candidate is copied into the editor this
+        # can send both flags even though no formal ChapterContent exists.
+        # The explicit failed-generation restart is the authoritative intent
+        # in that state, so recover defensively instead of returning a 409.
+        req.regenerate, req.restart_failed_generation = _normalize_chapter_generation_mode(
+            req.regenerate,
+            req.restart_failed_generation,
+            has_formal_content,
+        )
+        if has_formal_content and not req.regenerate:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
@@ -1710,7 +1733,7 @@ class NovelGenerateService:
                 ),
             )
         if req.regenerate:
-            if not isinstance(existing_text, str) or not existing_text.strip():
+            if not has_formal_content:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="本章尚无正式正文，请使用普通生成。",
@@ -1917,7 +1940,9 @@ class NovelGenerateService:
         if chapter.synopsis:
             prompt += f"本章简介：{chapter.synopsis}\n"
         prompt += (
-            "请生成4500—5500字的完整小说正文。只输出角色世界内的正文，不输出章节加工说明。"
+            "请生成4500—5500字的完整小说正文，最终正文绝对不得少于4200字或超过6200字；"
+            "临近结尾时主动收束篇幅，不要用重复回顾、重复验证或同义复述扩字。"
+            "只输出角色世界内的正文，不输出章节加工说明。"
             "所有交易必须写明期初持仓、买入、卖出、费用与期末余额；所有时间、权限、称呼和历史制度必须可核对。"
         )
 
@@ -1985,6 +2010,26 @@ class NovelGenerateService:
                 final_audit_issues = [] if _as_approved(final_audit.get("approved")) else (
                     _validated_ai_audit_issues(final_audit.get("issues"), content)
                 )
+                # A completed draft that only misses the deterministic length
+                # window is recoverable.  Perform one final compression/expansion
+                # pass instead of making the user repeatedly regenerate the
+                # whole chapter.  Logical, financial and continuity failures
+                # remain blocking and are never bypassed here.
+                if final_local and all(
+                    str(item.get("type") or "").lower() == "length"
+                    for item in final_local
+                ):
+                    content = await ai_service.revise_chapter_candidate(
+                        original_content=content,
+                        issues=final_local,
+                        context=full_context,
+                        prompt=prompt,
+                        ai_config=ai_config,
+                    )
+                    attempts = 3
+                    final_local = _local_chapter_issues(
+                        content, chapter_outline, state_ledger
+                    )
                 # Semantic findings have already driven one complete revision.
                 # They are retained for review but may not create an infinite
                 # regenerate/reject loop. Only deterministic issues still block.

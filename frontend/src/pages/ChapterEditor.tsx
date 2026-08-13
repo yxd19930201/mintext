@@ -162,10 +162,12 @@ export default function ChapterEditor() {
     if (!chapterId) return
     setSaving(true)
     try {
+      const savedStatus = status === 'manual_review' ? 'generated' : status
       await transport.patch(`/novels/${novelId}/chapters/${chapterId}/content`, {
         content,
-        status,
+        status: savedStatus,
       })
+      setStatus(savedStatus)
       setReviewDraft(null)
       setManualReview(false)
       alert('保存成功！')
@@ -180,7 +182,15 @@ export default function ChapterEditor() {
 
   const handleGenerate = async (options?: { restartFailedGeneration?: boolean; skipConfirm?: boolean }) => {
     if (!chapterId) return
-    const regenerate = Boolean(content.trim())
+    // A rejected candidate copied into the editor is not a formal saved
+    // ChapterContent version.  Treat it as a failed-generation restart even
+    // though the textarea is non-empty; otherwise the backend correctly
+    // rejects it as an attempt to regenerate a formal version that does not
+    // exist yet.
+    const restartFailedGeneration = Boolean(
+      options?.restartFailedGeneration || manualReview || status === 'manual_review'
+    )
+    const regenerate = Boolean(content.trim()) && !restartFailedGeneration
     if (regenerate && !options?.skipConfirm && !window.confirm(
       '确定重新生成本章吗？\n\n系统会保留旧正文版本，并在生成时回滚本章写入的状态账本、交易记录和不可逆事实。新正文审核通过后才会替换当前版本。'
     )) return
@@ -188,7 +198,7 @@ export default function ChapterEditor() {
     try {
       const res = await novelAiApi.generateChapter(Number(chapterId), {
         regenerate,
-        restart_failed_generation: Boolean(options?.restartFailedGeneration),
+        restart_failed_generation: restartFailedGeneration,
       })
       if (res.data) {
         setContent(res.data.content)
@@ -261,7 +271,13 @@ export default function ChapterEditor() {
               导出
             </button>
             <button className="btn btn-primary" onClick={() => handleGenerate()} disabled={generating}>
-              {generating ? '生成、审核与返修中...' : content.trim() ? '重新生成' : 'AI 生成内容'}
+              {generating
+                ? '生成、审核与返修中...'
+                : manualReview
+                  ? '重新生成候选正文'
+                  : content.trim()
+                    ? '重新生成'
+                    : 'AI 生成内容'}
             </button>
             <button className="btn" onClick={handleSave} disabled={saving}>
               {saving ? '保存中...' : '保存'}

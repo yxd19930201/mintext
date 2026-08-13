@@ -23,9 +23,6 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # Development/test frameworks are not used by the bundled FastAPI server.
-    # Excluding them prevents PyInstaller hooks from recursively scanning
-    # local pytest caches that may belong to another Windows sandbox account.
     excludes=['django', 'pytest'],
     noarchive=False,
     optimize=0,

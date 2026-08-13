@@ -34,7 +34,10 @@ export function normalizePromptText(value: string): string {
 
 /**
  * Heuristic: is this page still showing the same problem we just asked?
- * Long design prompts rarely appear verbatim in full; match head + mid slices.
+ * Long design prompts rarely appear verbatim in full; match head + mid + tail
+ * slices.  Head + mid alone is unsafe for chained novel work because draft,
+ * audit and revision prompts share the same system rules and large context.
+ * That previously made the draft answer look reusable for the audit request.
  */
 export function pageLikelyContainsPrompt(pageText: string, prompt: string): boolean {
   const page = normalizePromptText(pageText);
@@ -45,7 +48,9 @@ export function pageLikelyContainsPrompt(pageText: string, prompt: string): bool
   if (!page.includes(head)) return false;
   const midStart = Math.min(Math.max(0, Math.floor(compact.length / 2) - 48), Math.max(0, compact.length - 96));
   const mid = compact.slice(midStart, midStart + 96);
-  return mid.length < 24 || page.includes(mid);
+  if (mid.length >= 24 && !page.includes(mid)) return false;
+  const tail = compact.slice(-128);
+  return tail.length < 24 || page.includes(tail);
 }
 
 /** Prefer reusable answers that already look like structured model output. */
@@ -133,6 +138,13 @@ export function classifyAuthenticationState(
   loginVisible: boolean,
   credentialVisible: boolean,
 ): Pick<BrowserProviderProbe, "state" | "reason"> | null {
+  const visible = `${title}\n${body}`;
+  if (/账号已被禁言|账户已被禁言|account (?:is |has been )?(?:restricted|suspended)|temporarily restricted/i.test(visible)) {
+    return {
+      state: "verification_required",
+      reason: `${label} 账号当前受限/禁言，网页版暂时不能提交生成任务，请更换账号或等待限制解除`,
+    };
+  }
   if (/正在验证您是否是真人|请稍候|verify you are human|checking your browser|just a moment|challenge-platform/i.test(`${title}\n${body}`)) {
     return { state: "verification_required", reason: `${label} 需要在系统 Chrome 或 Edge 中完成人工真人验证` };
   }
@@ -563,7 +575,9 @@ export class BrowserProviderAdapter {
       const baselineText = await page.locator("body").innerText();
       const baselineEnvelopeCount = this.countOccurrences(baselineText, JSON_CLOSE);
       const promptEnvelopeCount = this.countOccurrences(prompt, JSON_CLOSE);
-      const baselineAssistantCount = (await this.collectAssistantTexts(page)).length;
+      const baselineAssistantFingerprints = new Set(
+        (await this.collectAssistantTexts(page)).map(answerFingerprint),
+      );
       const input = await this.fillPrompt(page, prompt, timeoutMs);
       const send = await this.firstVisible(page, this.definition.sendSelectors, 5_000);
       if (send) await send.click();
@@ -573,7 +587,7 @@ export class BrowserProviderAdapter {
         await this.waitForResponse(
           page,
           baselineEnvelopeCount + promptEnvelopeCount + 1,
-          baselineAssistantCount,
+          baselineAssistantFingerprints,
           timeoutMs,
         );
       } catch (waitError) {
@@ -582,7 +596,7 @@ export class BrowserProviderAdapter {
         }
         // Final harvest after the hard healthy-wait budget; answer may still
         // have finished while we were deciding to stop.
-        const salvaged = await this.salvageAnswerAfterTimeout(page, baselineAssistantCount, 15_000);
+        const salvaged = await this.salvageAnswerAfterTimeout(page, baselineAssistantFingerprints, 15_000);
         if (salvaged) {
           const conversationId = await this.findNewConversationId(page, conversationIdsBefore);
           return { rawText: salvaged, conversationId, salvagedAfterTimeout: true };
@@ -646,7 +660,7 @@ export class BrowserProviderAdapter {
 
   private async salvageAnswerAfterTimeout(
     page: Page,
-    baselineAssistantCount: number,
+    baselineAssistantFingerprints: Set<string>,
     graceMs: number,
   ): Promise<string | null> {
     const deadline = Date.now() + graceMs;
@@ -655,7 +669,7 @@ export class BrowserProviderAdapter {
     while (Date.now() < deadline) {
       const assistantTexts = await this.collectAssistantTexts(page);
       const candidate = selectLongestResponseCandidate(
-        assistantTexts.slice(baselineAssistantCount),
+        assistantTexts.filter((text) => !baselineAssistantFingerprints.has(answerFingerprint(text))),
       );
       if (candidate && candidate !== lastCandidate) {
         lastCandidate = candidate;
@@ -899,14 +913,12 @@ export class BrowserProviderAdapter {
   }
 
   private async startIndependentConversation(page: Page, timeoutMs: number): Promise<void> {
-    if (this.id === "chatgpt") {
-      await page.goto(this.definition.homeUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
-      await page.waitForTimeout(750);
-      return;
-    }
-    if (!page.url().startsWith(this.definition.homeUrl)) {
-      await page.goto(this.definition.homeUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
-    }
+    // Always return to the provider home before a new task.  Reusing the
+    // current conversation contaminates a chained workflow: e.g. a ledger
+    // extraction answer can be mistaken for the next prose/revision answer.
+    await page.goto(this.definition.homeUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    await page.waitForTimeout(this.id === "chatgpt" ? 750 : 350);
+    if (this.id === "chatgpt") return;
     const newChat = await this.firstVisible(page, this.definition.newConversationSelectors, 2_000);
     if (newChat) {
       await newChat.click();
@@ -947,7 +959,16 @@ export class BrowserProviderAdapter {
   }
 
   private async fillPrompt(page: Page, prompt: string, timeoutMs: number): Promise<Locator> {
-    return fillStablePrompt(page, this.definition.inputSelectors, prompt, timeoutMs, this.definition.label);
+    // A loaded chat page should expose its editor quickly. Waiting the entire
+    // generation budget here hides account restrictions and provider errors
+    // for up to twelve minutes before the user gets any feedback.
+    return fillStablePrompt(
+      page,
+      this.definition.inputSelectors,
+      prompt,
+      Math.min(timeoutMs, 20_000),
+      this.definition.label,
+    );
   }
 
   private async firstVisible(
@@ -1005,7 +1026,7 @@ export class BrowserProviderAdapter {
   private async waitForResponse(
     page: Page,
     expectedEnvelopeCount: number,
-    baselineAssistantCount: number,
+    baselineAssistantFingerprints: Set<string>,
     timeoutMs: number,
   ): Promise<void> {
     const budget = resolveGenerationWaitBudget(timeoutMs);
@@ -1046,8 +1067,10 @@ export class BrowserProviderAdapter {
       }
 
       const assistantTexts = await this.collectAssistantTexts(page);
-      if (assistantTexts.length > baselineAssistantCount) {
-        const newCandidates = assistantTexts.slice(baselineAssistantCount);
+      const newCandidates = assistantTexts.filter(
+        (text) => !baselineAssistantFingerprints.has(answerFingerprint(text)),
+      );
+      if (newCandidates.length > 0) {
         // DeepSeek's DOM may expose a short nested JSON node (for example only
         // {"title":"..."}) while the parent answer is still streaming. Never
         // accept that transient parseable object immediately: track the longest
@@ -1159,8 +1182,9 @@ export class BrowserProviderAdapter {
     const truncatedJson = [...texts].reverse().find((text) => text.includes("{") && /["']?content["']?\s*:/.test(text));
     if (truncatedJson) return truncatedJson;
 
-    const bodyText = await page.locator("body").innerText();
-    if (bodyText.includes(JSON_OPEN)) return bodyText;
+    // Do not parse the whole page: it contains the user's prompt and therefore
+    // our envelope example. On a provider/network error that prompt can look
+    // like a valid answer even though the assistant produced no output.
     throw new AdapterError("EMPTY_MODEL_RESPONSE", "没有找到模型最终回复", true);
   }
 
