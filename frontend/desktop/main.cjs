@@ -121,7 +121,9 @@ async function startBundledServer(adapterUrl) {
 
   const executable = path.join(process.resourcesPath, 'server', 'mintext-server.exe')
   if (!fs.existsSync(executable)) throw new Error(`找不到内置服务：${executable}`)
-  const port = await findFreePort()
+  // The optional browser extension must be able to discover the local API
+  // without reading Electron internals. Keep the loopback port stable.
+  const port = 8000
   const dataDir = path.join(app.getPath('userData'), 'server-data')
   fs.mkdirSync(dataDir, { recursive: true })
   const log = fs.openSync(path.join(app.getPath('userData'), 'server.log'), 'a')
@@ -172,6 +174,19 @@ function configureWebAiIpc() {
     const body = await response.json()
     if (!response.ok) throw new Error(body?.error?.message || `网页登录失败：HTTP ${response.status}`)
     return body
+  })
+}
+
+function configureBrowserExtensionIpc() {
+  ipcMain.removeHandler('browser-extension-open-folder')
+  ipcMain.handle('browser-extension-open-folder', async () => {
+    const extensionPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'browser-extension')
+      : path.join(__dirname, '..', '..', 'browser-extension')
+    if (!fs.existsSync(extensionPath)) throw new Error(`找不到青玉浏览器助手：${extensionPath}`)
+    const error = await shell.openPath(extensionPath)
+    if (error) throw new Error(error)
+    return extensionPath
   })
 }
 
@@ -232,6 +247,7 @@ app.whenReady().then(async () => {
     const adapterUrl = await startWebAiAdapter()
     const url = await startBundledServer(adapterUrl)
     configureWebAiIpc()
+    configureBrowserExtensionIpc()
     createWindow(url)
   } catch (error) {
     dialog.showErrorBox('Mintext 启动失败', `${error.message}\n\n日志：${path.join(app.getPath('userData'), 'server.log')}`)

@@ -81,6 +81,11 @@
         "to": "web-ai-adapter/node_modules/require-from-string"
       },
       {
+        "from": "../browser-extension",
+        "to": "browser-extension",
+        "filter": ["**/*"]
+      },
+      {
         "from": "build/icon.png",
         "to": "icon.png"
       },

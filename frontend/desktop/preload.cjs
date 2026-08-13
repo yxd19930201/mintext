@@ -10,4 +10,7 @@ contextBridge.exposeInMainWorld('minitextDesktop', Object.freeze({
     probe: provider => ipcRenderer.invoke('web-ai-probe', provider),
     login: provider => ipcRenderer.invoke('web-ai-login', provider),
   }),
+  browserExtension: Object.freeze({
+    openFolder: () => ipcRenderer.invoke('browser-extension-open-folder'),
+  }),
 }))

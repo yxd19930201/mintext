@@ -56,6 +56,7 @@ export default function Layout() {
   else if (location.pathname.includes('/novels/')) crumbs.push('小说', '章节列表')
   else if (location.pathname === '/conversion') crumbs.push('小说转短剧')
   else if (location.pathname === '/ai') crumbs.push('AI 助手', '小说体检')
+  else if (location.pathname === '/publish') crumbs.push('发布中心', '番茄同步')
 
   return (
     <div className="ios-shell">
@@ -98,6 +99,15 @@ export default function Layout() {
             </svg>
             AI 助手
             <span className="ios-nav-badge">新</span>
+          </NavLink>
+          <NavLink
+            to="/publish"
+            className={({ isActive }) => `ios-nav-item${isActive ? ' active' : ''}`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14a2 2 0 0 0 2-2v-4"/><path d="M3 15v4a2 2 0 0 0 2 2"/>
+            </svg>
+            发布中心
           </NavLink>
           <NavLink
             to="/settings"

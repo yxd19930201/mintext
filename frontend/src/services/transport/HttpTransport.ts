@@ -70,6 +70,9 @@ declare global {
         probe: (provider: string) => Promise<WebAiProviderStatus>
         login: (provider: string) => Promise<WebAiProviderStatus>
       }
+      browserExtension: {
+        openFolder: () => Promise<string>
+      }
     }
   }
 }

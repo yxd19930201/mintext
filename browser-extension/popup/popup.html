@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>青玉浏览器助手</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="logo">玉</div>
+        <div><small>青玉书房</small><h1>浏览器助手</h1></div>
+        <span id="status" class="status offline">未连接</span>
+      </header>
+
+      <section>
+        <label>Mintext 本地服务地址<input id="api-base" type="url" placeholder="http://127.0.0.1:8000/api/v1" /></label>
+        <button id="save-api" class="secondary">保存地址</button>
+      </section>
+
+      <section id="connect-panel">
+        <h2>连接 Mintext</h2>
+        <p>请先启动青玉书房桌面端，再连接本机服务。不会上传 Cookie 或账号密码。</p>
+        <button id="connect" class="primary">连接本机 Mintext</button>
+      </section>
+
+      <section id="connected-panel" hidden>
+        <h2>设备已授权</h2>
+        <dl><dt>工作区</dt><dd id="workspace">—</dd><dt>设备</dt><dd id="device">—</dd><dt>最近错误</dt><dd id="last-error">无</dd></dl>
+        <div class="actions"><button id="claim" class="primary">立即检查任务</button><button id="disconnect" class="danger">断开连接</button></div>
+      </section>
+
+      <section id="web-ai-panel" hidden>
+        <h2>网页 AI 登录态</h2>
+        <p>插件使用自己创建的专用标签页，不会接管你正在使用的聊天窗口。</p>
+        <div class="provider-row">
+          <div><strong>ChatGPT</strong><span id="chatgpt-state" class="provider-state">未检测</span><span id="chatgpt-cleanup" class="provider-state">任务会话：完成后单条删除</span></div>
+          <button id="open-chatgpt" class="secondary compact">打开/登录</button>
+        </div>
+        <div class="provider-row">
+          <div><strong>DeepSeek</strong><span id="deepseek-state" class="provider-state">未检测</span><span id="deepseek-cleanup" class="provider-state">任务会话：完成后单条删除</span></div>
+          <button id="open-deepseek" class="secondary compact">打开/登录</button>
+        </div>
+      </section>
+
+      <footer>登录态只保存在本机浏览器 · 不读取 Cookie · 发布任务必须在桌面端显式创建</footer>
+      <p id="message" role="status"></p>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

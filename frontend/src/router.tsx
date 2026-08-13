@@ -10,6 +10,7 @@ import NovelToScript from './pages/NovelToScript'
 import Settings from './pages/Settings'
 import WorkCenter from './pages/WorkCenter'
 import AIAssistant from './pages/AIAssistant'
+import PublishCenter from './pages/PublishCenter'
 
 // Hash routing works both on the Vite dev server and from Electron's file:// URL.
 export const router = createHashRouter([
@@ -26,6 +27,7 @@ export const router = createHashRouter([
       { path: 'novels/:novelId/chapters/:chapterId', element: <ChapterEditor /> },
       { path: 'conversion', element: <NovelToScript /> },
       { path: 'ai', element: <AIAssistant /> },
+      { path: 'publish', element: <PublishCenter /> },
       { path: 'settings', element: <Settings /> },
     ],
   },

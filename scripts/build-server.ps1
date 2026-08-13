@@ -12,7 +12,8 @@ try {
         --hidden-import app.models.episode --hidden-import app.models.script `
         --hidden-import app.models.novel --hidden-import app.models.chapter `
         --hidden-import app.models.chapter_content --hidden-import app.models.ai_config `
-        --hidden-import app.models.ai_prompt_preset --hidden-import app.models.manuscript_report server.py
+        --hidden-import app.models.ai_prompt_preset --hidden-import app.models.manuscript_report `
+        --hidden-import app.models.browser_job server.py
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller backend build failed (exit $LASTEXITCODE)" }
     Write-Host "Server package: $Backend\dist\mintext-server.exe"
 } finally { Pop-Location }

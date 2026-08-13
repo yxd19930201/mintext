@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['app.models.user', 'app.models.project', 'app.models.episode', 'app.models.script', 'app.models.novel', 'app.models.chapter', 'app.models.chapter_content', 'app.models.ai_config', 'app.models.ai_prompt_preset', 'app.models.manuscript_report']
+hiddenimports = ['app.models.user', 'app.models.project', 'app.models.episode', 'app.models.script', 'app.models.novel', 'app.models.chapter', 'app.models.chapter_content', 'app.models.ai_config', 'app.models.ai_prompt_preset', 'app.models.manuscript_report', 'app.models.browser_job']
 tmp_ret = collect_all('uvicorn')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('sqlalchemy')

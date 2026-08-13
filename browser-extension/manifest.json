@@ -1,0 +1,60 @@
+{
+  "manifest_version": 3,
+  "name": "青玉浏览器助手",
+  "version": "0.5.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7/vJT3saqKQ0mSGVtwB+EaWHUFw1ZwZj7GK1kAv6Uw88jTZeET6tSFFa/XCrVwAH/hUuPTrLUHkqVbefcv8QdusMGOMhaJoooXOfMbuVUQnz9l9sxBcesNKUzOioSgal9Zb8KrCnzJQMLAkwGFJUGCElZLfxWz588Dxb/pPCu3d2WfaL1ixp7YoTjRx3viLcIKbJ+sd6cP77k7waHmWQ2+0I4c6x5oNlYWzgjhrxMuF23QrQdhNkRPfy0qfo1WfmpEN7OSGo77l5G0Sp2GRNv7yYWxgr2gZN7Ak8xWZHv0fl8WDVqqFyM0PiQmAu046P6ZsFLe1YruddEgXIffjiXQIDAQAB",
+  "description": "连接本机 Mintext，在用户确认后执行番茄发布及 ChatGPT、DeepSeek 网页任务。",
+  "permissions": ["storage", "tabs", "notifications", "alarms"],
+  "host_permissions": [
+    "https://fanqienovel.com/*",
+    "https://chatgpt.com/*",
+    "https://chat.deepseek.com/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "青玉浏览器助手",
+    "default_popup": "popup/popup.html",
+    "default_icon": "icons/icon48.png"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://fanqienovel.com/*"],
+      "js": [
+        "lib/adapter-contract.js",
+        "content/dom-driver.js",
+        "content/fanqie-adapter.js",
+        "content/executor.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://fanqienovel.com/*"],
+      "js": ["content/net-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.deepseek.com/*"],
+      "js": [
+        "content/web-ai-contract.js",
+        "content/conversation-cleanup.js",
+        "content/web-ai-adapter.js",
+        "content/web-ai-executor.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

@@ -1,0 +1,35 @@
+:root { color-scheme: light; font-family: "Microsoft YaHei", system-ui, sans-serif; color: #26344c; background: #f4f6fb; }
+* { box-sizing: border-box; }
+body { margin: 0; width: 380px; min-height: 480px; }
+main { padding: 18px; }
+header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.logo { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; color: white; font: 700 22px serif; background: linear-gradient(135deg,#5978d9,#8f75c9); box-shadow: 0 8px 18px #5068b52b; }
+h1,h2,p { margin: 0; }
+h1 { font-size: 17px; }
+h2 { font-size: 14px; margin-bottom: 8px; }
+small { color: #78849b; }
+.status { margin-left: auto; padding: 4px 8px; border-radius: 99px; font-size: 11px; background: #eef0f5; color: #768096; }
+.status.online { background: #e3f6eb; color: #22834c; }
+section { background: white; border: 1px solid #e4e8f1; border-radius: 14px; padding: 14px; margin-bottom: 12px; box-shadow: 0 7px 20px #36517b0b; }
+label { display: grid; gap: 7px; font-size: 12px; color: #5d6880; }
+input { width: 100%; border: 1px solid #d7ddea; border-radius: 9px; padding: 9px 10px; outline: none; }
+input:focus { border-color: #7189dd; box-shadow: 0 0 0 3px #7189dd18; }
+button { border: 0; border-radius: 9px; padding: 9px 12px; cursor: pointer; font-weight: 600; }
+button:disabled { opacity: .55; cursor: wait; }
+.primary { background: #536fcb; color: white; }
+.secondary { background: #edf1fb; color: #4f67b4; margin-top: 9px; }
+.danger { background: #fff0f2; color: #c14c61; }
+section p { font-size: 12px; line-height: 1.6; color: #707b91; margin-bottom: 12px; }
+details { margin-top: 12px; font-size: 12px; color: #6c7690; }
+.pair,.actions { display: flex; gap: 8px; margin-top: 10px; }
+.provider-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid #edf0f6; }
+.provider-row div { display: grid; gap: 3px; }
+.provider-row strong { font-size: 12px; }
+.provider-state { color: #7c879d; font-size: 11px; }
+.compact { margin-top: 0; padding: 7px 9px; font-size: 11px; }
+.pair input { flex: 1; }
+dl { display: grid; grid-template-columns: 70px 1fr; gap: 8px; margin: 10px 0; font-size: 12px; }
+dt { color: #8892a8; } dd { margin: 0; overflow-wrap: anywhere; }
+footer { color: #8993a7; text-align: center; font-size: 10px; line-height: 1.5; padding: 6px; }
+#message { min-height: 18px; color: #5069bf; font-size: 12px; text-align: center; }
+#message.error { color: #c14c61; }
