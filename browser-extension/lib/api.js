@@ -71,6 +71,7 @@ export async function connectMaliang() {
 }
 
 export async function disconnect() {
+  await api("/browser-extension/disconnect", { method: "POST" }).catch(() => null);
   await chrome.storage.local.remove([
     "accessToken", "refreshToken", "deviceRecordId", "workspaceId", "connected",
   ]);

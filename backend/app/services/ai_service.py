@@ -17,6 +17,7 @@ from app.models.ai_config import AIConfig
 from app.services.creative_prompt_service import creative_prompt, normalize_short_script
 from app.services.novel_skill_service import novel_skill_prompt
 from app.services.ai_usage_service import ai_usage_service
+from app.services.browser_extension_service import extension_is_connected, run_browser_ai_task
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,40 @@ class AIService:
             "timeoutMs": 720_000,
             "maxAttempts": 2,
         }
+        if extension_is_connected():
+            extension_payload = {
+                "provider": model,
+                "operation": "json_generation" if json_mode else "text_generation",
+                "prompt": instruction,
+                "json_schema": output_schema if json_mode else None,
+                "mode": "fast" if model == "deepseek" else "current",
+                "idempotency_key": f"ai-{fingerprint}",
+            }
+            result = await run_browser_ai_task(extension_payload, timeout_seconds=780.0)
+            if json_mode:
+                data = result.get("data")
+                if not isinstance(data, dict):
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="BROWSER_EXTENSION_INVALID_JSON:浏览器助手未返回结构化结果",
+                    )
+                return json.dumps(data, ensure_ascii=False)
+            output_text = result.get("output_text")
+            if not isinstance(output_text, str) or not output_text.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="BROWSER_EXTENSION_EMPTY_CONTENT:浏览器助手未返回正文",
+                )
+            try:
+                parsed = self._parse_json_response(output_text, "browser extension content")
+                content = parsed.get("content") if isinstance(parsed, dict) else None
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+            except HTTPException:
+                pass
+            return output_text.strip()
+
+        logger.info("Qingyu browser extension offline; using legacy web adapter fallback")
         timeout = httpx.Timeout(connect=20.0, read=780.0, write=90.0, pool=20.0)
         try:
             body = await self._post_web_task(base_url, api_key, payload, timeout)

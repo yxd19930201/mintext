@@ -65,7 +65,8 @@ test("cleanup deletes only the committed task session and preserves it when iden
   assert.match(executor, /if \(!context\?\.data\?\.managed\)/);
   assert.match(background, /webAiSessionCleanupLock/);
   assert.match(background, /WEB_AI_SESSION_CLEANUP_FINISHED/);
-  assert.match(background, /if \(holdForCleanup\) setTimeout\(claimLoop, 60_250\)/);
+  assert.match(background, /if \(holdForCleanup\) scheduleClaim\(60_250\)/);
+  assert.match(background, /if \(claimTimer\) clearTimeout\(claimTimer\)/);
 });
 
 test("web AI runs in extension-owned tabs and uses DOM only", async () => {

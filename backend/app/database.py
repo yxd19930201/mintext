@@ -59,3 +59,14 @@ async def init_db():
         for name, sql_type in ai_additions.items():
             if name not in ai_columns:
                 await conn.execute(text(f"ALTER TABLE ai_configs ADD COLUMN {name} {sql_type}"))
+
+        def existing_browser_job_columns(sync_conn):
+            return {column["name"] for column in inspect(sync_conn).get_columns("browser_jobs")}
+
+        browser_job_columns = await conn.run_sync(existing_browser_job_columns)
+        if "idempotency_key" not in browser_job_columns:
+            await conn.execute(text("ALTER TABLE browser_jobs ADD COLUMN idempotency_key VARCHAR(80)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_browser_jobs_idempotency_key "
+            "ON browser_jobs (idempotency_key)"
+        ))

@@ -7,6 +7,15 @@ const WEB_AI_HOME = {
   deepseek: "https://chat.deepseek.com/",
 };
 let polling = false;
+let claimTimer = null;
+
+function scheduleClaim(delayMs = 2_000) {
+  if (claimTimer) clearTimeout(claimTimer);
+  claimTimer = setTimeout(() => {
+    claimTimer = null;
+    claimLoop();
+  }, delayMs);
+}
 
 async function clearTransientError() {
   await chrome.storage.local.set({ lastError: null, lastErrorAt: null });
@@ -180,6 +189,7 @@ async function claimLoop() {
     await chrome.storage.local.set({ lastError: error.message, lastErrorAt: new Date().toISOString() });
   } finally {
     polling = false;
+    scheduleClaim();
   }
 }
 
@@ -217,8 +227,8 @@ async function completeActive(status, result = {}, error = null, options = {}) {
       title: "青玉浏览器助手", message: error || "浏览器任务需要处理",
     }).catch(() => {});
   }
-  if (holdForCleanup) setTimeout(claimLoop, 60_250);
-  else setTimeout(claimLoop, 250);
+  if (holdForCleanup) scheduleClaim(60_250);
+  else scheduleClaim(250);
   return { committed, status: serverAcceptedStatus, result: completed?.result || {}, cleanup_pending: holdForCleanup };
 }
 
@@ -234,12 +244,12 @@ async function deferActive(eventType, payload = {}) {
     type: "basic", iconUrl: chrome.runtime.getURL("icons/icon128.png"),
     title: "青玉浏览器助手", message: payload.error || "平台限额等待恢复",
   }).catch(() => {});
-  setTimeout(claimLoop, 250);
+  scheduleClaim(250);
 }
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("maliang-heartbeat", { periodInMinutes: 1 });
-  chrome.alarms.create("maliang-claim", { periodInMinutes: 1 });
+  chrome.alarms.create("maliang-claim", { periodInMinutes: 0.5 });
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -289,7 +299,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const sameTab = !lock?.tabId || lock.tabId === sender.tab?.id;
       if (sameTask && sameTab) {
         await chrome.storage.session.remove("webAiSessionCleanupLock");
-        setTimeout(claimLoop, 250);
+        scheduleClaim(250);
       }
       return { released: Boolean(sameTask && sameTab) };
     }

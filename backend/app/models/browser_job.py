@@ -17,6 +17,7 @@ class BrowserJob(Base, TimestampMixin):
     owner_id = Column(Integer, nullable=False, default=1, index=True)
     kind = Column(String(32), nullable=False, default="fanqie_publish", index=True)
     operation = Column(String(32), nullable=False, index=True)
+    idempotency_key = Column(String(80), nullable=True, index=True)
     payload_json = Column(Text, nullable=False, default="{}")
     status = Column(String(32), nullable=False, default="queued", index=True)
     result_json = Column(Text, nullable=False, default="{}")

@@ -18,10 +18,14 @@ from app.schemas.browser_extension import (
     PublishChapterCreate,
 )
 from app.schemas.common import ApiResponse
+from app.services.browser_extension_service import (
+    extension_state,
+    mark_extension_disconnected,
+    mark_extension_seen,
+)
 
 
 router = APIRouter()
-_extension_state: dict = {"connected": False, "last_seen_at": None}
 
 
 def _job_read(job: BrowserJob) -> dict:
@@ -43,14 +47,12 @@ def _job_read(job: BrowserJob) -> dict:
 
 @router.post("/connect", response_model=ApiResponse[dict])
 async def connect_extension(req: BrowserConnect):
-    _extension_state.update({
-        "connected": True,
-        "last_seen_at": datetime.now(timezone.utc).isoformat(),
-        "device_id": req.device_id or "local-browser",
-        "browser": req.browser,
-        "extension_version": req.extension_version,
-        "display_name": req.display_name or "青玉浏览器助手",
-    })
+    mark_extension_seen(
+        device_id=req.device_id or "local-browser",
+        browser=req.browser,
+        extension_version=req.extension_version,
+        display_name=req.display_name or "青玉浏览器助手",
+    )
     # Localhost-only transport: the token is a compatibility marker, not a cloud credential.
     return ApiResponse(data={
         "access_token": "mintext-local-extension",
@@ -58,6 +60,12 @@ async def connect_extension(req: BrowserConnect):
         "device_id": req.device_id or "local-browser",
         "workspace_id": "mintext-local",
     })
+
+
+@router.post("/disconnect", response_model=ApiResponse[dict])
+async def disconnect_extension():
+    mark_extension_disconnected()
+    return ApiResponse(data={"disconnected": True})
 
 
 @router.post("/jobs", response_model=ApiResponse[dict])
@@ -129,22 +137,13 @@ async def list_jobs(
 
 @router.post("/heartbeat", response_model=ApiResponse[dict])
 async def heartbeat(metadata: dict | None = None):
-    _extension_state.update({
-        "connected": True,
-        "last_seen_at": datetime.now(timezone.utc).isoformat(),
-        "metadata": metadata or {},
-    })
-    return ApiResponse(data={"accepted": True, "server_time": _extension_state["last_seen_at"]})
+    state = mark_extension_seen(metadata=metadata or {})
+    return ApiResponse(data={"accepted": True, "server_time": state["last_seen_at"]})
 
 
 @router.get("/status", response_model=ApiResponse[dict])
 async def extension_status():
-    state = dict(_extension_state)
-    last_seen = state.get("last_seen_at")
-    if last_seen:
-        seen = datetime.fromisoformat(last_seen)
-        state["connected"] = (datetime.now(timezone.utc) - seen).total_seconds() < 150
-    return ApiResponse(data=state)
+    return ApiResponse(data=extension_state())
 
 
 @router.post("/jobs/claim", response_model=ApiResponse[dict])
@@ -159,6 +158,7 @@ async def claim_job(
         .where(or_(
             BrowserJob.status == "queued",
             (BrowserJob.status == "leased") & (BrowserJob.leased_until < now),
+            (BrowserJob.status == "running") & (BrowserJob.leased_until < now),
         ))
         .order_by(BrowserJob.created_at.asc())
         .limit(1)
@@ -180,7 +180,7 @@ async def job_event(job_id: str, req: BrowserJobEvent, db: AsyncSession = Depend
         raise HTTPException(status_code=404, detail="浏览器任务不存在")
     if job.lease_token and req.lease_token != job.lease_token:
         raise HTTPException(status_code=409, detail="浏览器任务租约已变化")
-    if req.event_type in {"STARTED", "LEASE_RENEWED", "PROGRESS"}:
+    if req.event_type in {"STARTED", "LEASE_RENEWED", "PROGRESS", "STREAM_PROGRESS"}:
         job.status = "running"
         job.renew_lease()
     elif req.event_type == "RATE_LIMITED":

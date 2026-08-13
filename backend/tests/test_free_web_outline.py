@@ -7,10 +7,11 @@ from app.schemas.novel_generate import GenerateNovelOutlineRequest
 from app.schemas.generation_mode import GenerationModeOptions
 from app.services.generation_mode_service import resolve_generation_config
 from app.services.novel_generate_service import NovelGenerateService
+from app.services.ai_service import AIService
 
 
 def test_novel_outline_free_mode_uses_browser_provider_not_default_api():
-    db = AsyncMock()
+    db = SimpleNamespace(commit=AsyncMock())
     service = NovelGenerateService(db)
     novel = SimpleNamespace(
         id=9,
@@ -94,3 +95,51 @@ def test_central_resolver_free_mode_never_reads_api_repository():
     assert config.api_key == "web-login"
     repo.get.assert_not_awaited()
     repo.get_default.assert_not_awaited()
+
+
+def test_free_web_call_prefers_connected_browser_extension():
+    extension_result = {
+        "output_text": '<MODEL_JSON>{"content":"扩展生成正文"}</MODEL_JSON>',
+        "data": {"content": "扩展生成正文"},
+    }
+    with (
+        patch("app.services.ai_service.extension_is_connected", return_value=True),
+        patch("app.services.ai_service.run_browser_ai_task", new=AsyncMock(return_value=extension_result)) as run,
+        patch.object(AIService, "_post_web_task") as legacy,
+    ):
+        result = asyncio.run(
+            AIService()._call_web_adapter(
+                [{"role": "user", "content": "写一段正文"}],
+                "http://127.0.0.1:4310/v1",
+                "web-login",
+                "deepseek",
+                False,
+            )
+        )
+
+    assert result == "扩展生成正文"
+    assert run.await_args.args[0]["operation"] == "text_generation"
+    legacy.assert_not_awaited()
+
+
+def test_free_web_call_uses_legacy_adapter_only_when_extension_offline():
+    with (
+        patch("app.services.ai_service.extension_is_connected", return_value=False),
+        patch.object(
+            AIService,
+            "_post_web_task",
+            new=AsyncMock(return_value={"success": True, "data": {"content": "备用通道正文"}}),
+        ) as legacy,
+    ):
+        result = asyncio.run(
+            AIService()._call_web_adapter(
+                [{"role": "user", "content": "写一段正文"}],
+                "http://127.0.0.1:4310/v1",
+                "web-login",
+                "deepseek",
+                False,
+            )
+        )
+
+    assert result == "备用通道正文"
+    legacy.assert_awaited_once()

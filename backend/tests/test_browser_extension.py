@@ -1,10 +1,13 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database import get_db
 from app.main import app
 from app.models.base import Base
+from app.models.browser_job import BrowserJob
+from app.services.browser_extension_service import mark_extension_disconnected
 
 
 def test_local_extension_connect_and_job_lifecycle(monkeypatch):
@@ -53,6 +56,27 @@ async def _exercise_lifecycle():
             assert job["status"] == "leased"
             assert job["lease_token"]
 
+            started = await client.post(
+                f"/api/v1/browser-extension/jobs/{job_id}/events",
+                json={
+                    "event_type": "STARTED",
+                    "payload": {},
+                    "lease_token": job["lease_token"],
+                },
+            )
+            assert started.json()["data"]["status"] == "running"
+
+            async with session_factory() as session:
+                stalled = await session.get(BrowserJob, job_id)
+                stalled.leased_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+                await session.commit()
+
+            reclaimed = await client.post("/api/v1/browser-extension/jobs/claim?wait_seconds=0")
+            assert reclaimed.status_code == 200
+            job = reclaimed.json()["data"]
+            assert job["id"] == job_id
+            assert job["status"] == "leased"
+
             completed = await client.post(
                 f"/api/v1/browser-extension/jobs/{job_id}/complete",
                 json={
@@ -64,6 +88,12 @@ async def _exercise_lifecycle():
             assert completed.status_code == 200
             assert completed.json()["data"]["status"] == "completed"
             assert completed.json()["data"]["result"]["authenticated"] is True
+
+            disconnected = await client.post("/api/v1/browser-extension/disconnect")
+            assert disconnected.status_code == 200
+            status = await client.get("/api/v1/browser-extension/status")
+            assert status.json()["data"]["connected"] is False
     finally:
+        mark_extension_disconnected()
         app.dependency_overrides.pop(get_db, None)
         await engine.dispose()

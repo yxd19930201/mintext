@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { aiApi } from '../services/api/aiApi'
+import { browserExtensionApi, type BrowserExtensionStatus } from '../services/api/browserExtensionApi'
 import { webAi, type FreeProvider } from '../services/webAi'
 import type { WebAiProviderStatus } from '../services/transport/HttpTransport'
 import type { AIConfig } from '../types/models'
@@ -31,6 +32,7 @@ export default function Settings() {
   const [webStatuses, setWebStatuses] = useState<Record<string, WebAiProviderStatus>>({})
   const [webAiBusy, setWebAiBusy] = useState<string | null>(null)
   const [webAiError, setWebAiError] = useState('')
+  const [browserExtension, setBrowserExtension] = useState<BrowserExtensionStatus>({ connected: false })
   const webAiActionLock = useRef<string | null>(null)
 
   useEffect(() => {
@@ -39,6 +41,11 @@ export default function Settings() {
     webAi.status()
       .then(r => setWebStatuses(Object.fromEntries(r.providers.map(item => [item.id, item]))))
       .catch(error => setWebAiError(error instanceof Error ? error.message : String(error)))
+    browserExtensionApi.status().then(response => setBrowserExtension(response.data || { connected: false })).catch(() => {})
+    const timer = window.setInterval(() => {
+      browserExtensionApi.status().then(response => setBrowserExtension(response.data || { connected: false })).catch(() => {})
+    }, 5000)
+    return () => window.clearInterval(timer)
   }, [])
 
   const selectFreeProvider = (provider: FreeProvider) => {
@@ -156,10 +163,10 @@ export default function Settings() {
             ? '大纲每批调用1次，正文每章调用1次；不执行额外AI审核和自动返修，人物、资产及不可逆事实根据大纲状态在本地更新。速度更快、消耗更低，适合初稿和批量生成。'
             : generationMode === 'strict'
               ? '大纲和正文生成后都会执行AI一致性审核；发现冲突时自动返修并重新审核，正文通过后再由AI提取人物、资产及不可逆事实。连续性更严格，适合重要长篇和定稿。'
-              : '正文生成及其必要的审核、返修和连续性提取均通过已登录的 DeepSeek 或 ChatGPT 网页完成，不使用下方 API Key。'}
+              : '正文、大纲、短剧、分镜及其必要审核均优先交给青玉浏览器助手，在已登录的 DeepSeek 或 ChatGPT 网页完成，不使用下方 API Key。'}
           <div style={{ marginTop: 4, color: 'var(--text-3)' }}>
             {generationMode === 'free'
-              ? '首次使用请在下方选择网页渠道并完成登录；生成期间请勿关闭由 Mintext 打开的浏览器窗口。'
+              ? '首次使用请安装并连接青玉浏览器助手，再从扩展弹窗打开并登录网页渠道；生成期间请勿关闭任务标签页。助手离线时才启用旧网页适配器作为兼容备用通道。'
               : '经济模式通常只产生基础生成调用；标准模式会增加审核、返修和账本提取调用，实际Token消耗取决于章节长度及返修次数。'}
           </div>
         </div>
@@ -169,7 +176,7 @@ export default function Settings() {
         <div className="card" style={{ marginBottom: 20 }}>
           <div style={{ fontWeight: 600 }}>免费网页渠道</div>
           <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-2)' }}>
-            选择生成正文时使用的网站。登录状态仅保存在本机 Mintext 数据目录中。
+            选择免费模式使用的网站。当前主通道：{browserExtension.connected ? '青玉浏览器助手已连接' : '青玉浏览器助手未连接，将使用兼容网页适配器'}。
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
             {(['deepseek', 'chatgpt'] as FreeProvider[]).map(provider => {
@@ -185,12 +192,16 @@ export default function Settings() {
                       {ready ? '已登录，可以生成正文' : status?.reason || '尚未检测登录状态'}
                     </div>
                   </div>
-                  <button className="btn btn-ghost" disabled={webAiBusy !== null} onClick={() => handleProbe(provider)}>
-                    {webAiBusy === `probe:${provider}` ? '检测中…' : '检测'}
-                  </button>
-                  <button className="btn btn-primary" disabled={webAiBusy !== null} onClick={() => handleWebLogin(provider)}>
-                    {webAiBusy === `login:${provider}` ? '等待登录…' : ready ? '重新登录' : '登录'}
-                  </button>
+                  {browserExtension.connected ? (
+                    <span style={{ fontSize: 12, color: 'var(--primary)' }}>请在扩展弹窗中打开/登录</span>
+                  ) : <>
+                    <button className="btn btn-ghost" disabled={webAiBusy !== null} onClick={() => handleProbe(provider)}>
+                      {webAiBusy === `probe:${provider}` ? '检测中…' : '备用通道检测'}
+                    </button>
+                    <button className="btn btn-primary" disabled={webAiBusy !== null} onClick={() => handleWebLogin(provider)}>
+                      {webAiBusy === `login:${provider}` ? '等待登录…' : ready ? '备用通道重新登录' : '备用通道登录'}
+                    </button>
+                  </>}
                 </div>
               )
             })}
